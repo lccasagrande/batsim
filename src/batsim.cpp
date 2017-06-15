@@ -484,7 +484,7 @@ void initialize_msg(const MainArguments & main_args, int argc, char * argv[])
     // Must be initialized before MSG_init
     if (main_args.energy_used)
     {
-        sg_energy_plugin_init();
+        sg_host_energy_plugin_init();
     }
 
     MSG_init(&argc, argv);
