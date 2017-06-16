@@ -16,7 +16,7 @@ implicit_instances:
         - {"name":"issue32", "filename":"${batsim_dir}/workload_profiles/issue32.json"}
       algo:
         - {"name":"killer", "sched_name":"killer"}
-      redis_enabled: ["true", "false"]
+      redis_enabled: ["false"]
     generic_instance:
       timeout: 3600
       working_directory: ${base_working_directory}
@@ -80,7 +80,7 @@ implicit_instances:
         - {"name":"issue32", "filename":"${batsim_dir}/workload_profiles/issue32.json"}
       algo:
         - {"name":"killer2", "sched_name":"killer2"}
-      redis_enabled: ["true", "false"]
+      redis_enabled: ["false"]
     generic_instance:
       timeout: 3600
       working_directory: ${base_working_directory}

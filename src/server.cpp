@@ -615,6 +615,12 @@ void server_on_kill_jobs(ServerData * data,
     KillerProcessArguments * args = new KillerProcessArguments;
     args->context = data->context;
 
+    if (data->context->redis_enabled)
+    {
+        XBT_WARN("Jobs are killed but Redis is enabled... This may lead to segmentation fault! "
+                 "GitHub issue: https://github.com/oar-team/batsim/issues/39");
+    }
+
     for (const JobIdentifier & job_id : message->jobs_ids)
     {
         Job * job = data->context->workloads.job_at(job_id);
