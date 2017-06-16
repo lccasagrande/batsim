@@ -78,7 +78,7 @@ test_test:
     - make install
 
     - cd /builds/batsim/batsim/build
-    - CTEST_OUTPUT_ON_FAILURE=1 ctest -E remote
+    - CTEST_OUTPUT_ON_FAILURE=1 ctest -E 'remote|smpi'
   dependencies:
     - build_clang
     - build_batsched
