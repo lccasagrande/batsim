@@ -16,7 +16,7 @@
     "profiles": {
         "msg_hg_10": {
             "type": "msg_par_hg",
-            "cpu": 1e9,
+            "cpu": 4e9,
             "com": 0
         }
     }

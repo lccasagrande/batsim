@@ -60,6 +60,17 @@ implicit_instances:
               "time_switch_on": 152
             }
             EOF
+      commands_after_execution:
+        # Generate plot with evalys
+        - |
+            ${evalys_dir}/examples/poquetm/plot_energy_info.py \
+                --gantt --power \
+                -e ${output_directory}/out_consumed_energy.csv \
+                -j ${output_directory}/out_jobs.csv \
+                -p ${output_directory}/out_pstate_changes.csv \
+                --off 13 --switchon -1 --switchoff -2 \
+                --names Example \
+                -o ${output_directory}/energy_plot.pdf
 
 commands_before_instances:
   - ${batsim_dir}/test/is_batsim_dir.py ${base_working_directory}
