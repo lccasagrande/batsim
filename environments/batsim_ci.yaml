@@ -28,8 +28,8 @@ global:
   hostname: batsim
   work_dir: /root
 
-  simgrid_remote: https://github.com/mpoquet/simgrid.git
-  simgrid_commit: 587483ebe7882e # Fri Jan 6 15:45:05 2017
+  simgrid_remote: https://github.com/simgrid/simgrid.git
+  simgrid_commit: e96681fb8 # 2017-06-15 15:54 [ENERGY] Fixed wrong calculation for 1-core systems
 
   #execo_remote: https://github.com/mickours/execo.git
   execo_remote: https://github.com/mpoquet/execo.git
