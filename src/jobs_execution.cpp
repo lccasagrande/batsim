@@ -332,7 +332,7 @@ int execute_job_process(int argc, char *argv[])
                                                        args->context);
     CleanExecuteProfileData * cleanup_data = new CleanExecuteProfileData;
     cleanup_data->exec_process_args = args;
-    MSG_process_on_exit(execute_profile_cleanup, cleanup_data);
+    //MSG_process_on_exit(execute_profile_cleanup, cleanup_data);
     if (execute_profile(args->context, job->profile, args->allocation, cleanup_data, &remaining_time) == 1)
     {
         XBT_INFO("Job %s finished in time", job->id.c_str());
