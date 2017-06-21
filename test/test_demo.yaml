@@ -13,7 +13,7 @@ implicit_instances:
   implicit:
     sweep:
       platform :
-        - {"name":"homo128", "filename":"${base_output_directory}/platform.xml"}
+        - {"name":"cluster512", "filename":"${base_output_directory}/platform.xml", "master_host":"master_host0"}
       workload :
         - {"name":"medium", "filename":"${base_output_directory}/workload.json"}
       algo: ["filler", "easy_bf"]
@@ -21,7 +21,7 @@ implicit_instances:
       timeout: 10 # The instance is killed if it takes more than 10 seconds
       working_directory: ${base_working_directory}
       output_directory: ${base_output_directory}/${algo}
-      batsim_command: batsim -p ${platform[filename]} -w ${workload[filename]} -e ${output_directory}/out --mmax-workload
+      batsim_command: batsim -p ${platform[filename]} -w ${workload[filename]} -e ${output_directory}/out --mmax-workload -m ${platform[master_host]}
       sched_command: batsched -v ${algo}
     # These post commands are executed after each instance
     post_commands:
@@ -50,7 +50,7 @@ implicit_instances:
 commands_before_instances:
   - ${batsim_dir}/test/is_batsim_dir.py ${base_working_directory}
   - ${batsim_dir}/test/clean_output_dir.py ${base_output_directory}
-  - cp ${batsim_dir}/platforms/energy_platform_homogeneous_no_net_128.xml ${base_output_directory}/platform.xml
+  - cp ${batsim_dir}/platforms/cluster512.xml ${base_output_directory}/platform.xml
   - cp ${batsim_dir}/workload_profiles/batsim_paper_workload_example.json ${base_output_directory}/workload.json
 
 # These post commands are done once all instances have been executed
