@@ -73,7 +73,7 @@ def generate_flat_platform(nb_hosts, output_file):
     header = """
 <?xml version='1.0'?>
 <!DOCTYPE platform SYSTEM "http://simgrid.gforge.inria.fr/simgrid/simgrid.dtd">
-<platform version="4">
+<platform version="4.1">
 <config id="General">
     <!-- <prop id="network/coordinates" value="yes"></prop> -->
     <!-- Reduce the size of the stack_size. On huge machine, if the stack is
