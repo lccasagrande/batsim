@@ -7,21 +7,17 @@
         "job1":"252->262"
     },
 
-    "nb_res": 1,
+    "nb_res": 2,
     "jobs": [
-        {"id":0, "subtime":0, "walltime": 15, "res": 1, "profile": "msg_hg_10"},
-        {"id":1, "subtime":100, "walltime": 15, "res": 1, "profile": "msg_hg_10"}
+        {"id":0, "subtime":  0, "walltime": 100, "res": 2, "profile": "msg_hg_10"},
+        {"id":1, "subtime":100, "walltime": 100, "res": 2, "profile": "msg_hg_10"}
     ],
 
     "profiles": {
-        "delay10": {
-            "type": "delay",
-            "delay": 10
-        },
         "msg_hg_10": {
             "type": "msg_par_hg",
             "cpu": 1e9,
-            "com": 0
+            "com": 3e9
         }
     }
 }

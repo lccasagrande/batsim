@@ -14,17 +14,18 @@ implicit_instances:
   implicit:
     sweep:
       platform :
-        - {"name":"homo128", "filename":"${batsim_dir}/platforms/energy_platform_homogeneous_no_net_128.xml"}
+        - {"name":"homo128", "filename":"${batsim_dir}/platforms/cluster_energy_128.xml", "master_host":"master_host0"}
       workload :
-        - {"name":"two_jobs", "filename":"${batsim_dir}/workload_profiles/energy_minimal.json"}
+        - {"name":"comp", "filename":"${batsim_dir}/workload_profiles/energy_minimal_compute.json"}
+        - {"name":"comm", "filename":"${batsim_dir}/workload_profiles/energy_minimal_comm.json"}
       algo:
         - {"name":"subpart_sleeper", "sched_name":"energy_bf_subpart_sleeper"}
       monitoring_period: [30]
     generic_instance:
       timeout: 10
       working_directory: ${base_working_directory}
-      output_directory: ${base_output_directory}/results/${instance_id}
-      batsim_command: batsim -p ${platform[filename]} -w ${workload[filename]} -E -e ${output_directory}/out --mmax-workload
+      output_directory: ${base_output_directory}/results/${workload[name]}
+      batsim_command: batsim -p ${platform[filename]} -w ${workload[filename]} -E -e ${output_directory}/out --mmax-workload -m ${platform[master_host]}
       sched_command: batsched -v ${algo[sched_name]} --variant_options_filepath ${output_directory}/sched_input.json
       commands_before_execution:
         # Generate sched options
@@ -59,19 +60,27 @@ implicit_instances:
               "time_switch_on": 152
             }
             EOF
-      commands_after_execution:
-        # Generate plot with evalys
-        - |
-            ${evalys_dir}/examples/poquetm/plot_energy_info.py \
-                --gantt --power \
-                -e ${output_directory}/out_consumed_energy.csv \
-                -j ${output_directory}/out_jobs.csv \
-                -p ${output_directory}/out_pstate_changes.csv \
-                --off 13 --switchon -1 --switchoff -2 \
-                --names Example \
-                -o ${output_directory}/energy_plot.png
 
 commands_before_instances:
   - ${batsim_dir}/test/is_batsim_dir.py ${base_working_directory}
   - ${batsim_dir}/test/clean_output_dir.py ${base_output_directory}
 
+commands_after_instances:
+  # Generate plot with evalys
+  - |
+      #!/usr/bin/env bash
+      set -eux
+      source ${base_output_directory}/base_variables.bash
+      comp=${base_output_directory}/results/comp/out
+      comm=${base_output_directory}/results/comm/out
+      ${evalys_dir}/examples/poquetm/plot_energy_info.py \
+          --gantt --power \
+          -e ${comp}_consumed_energy.csv \
+             ${comm}_consumed_energy.csv \
+          -j ${comp}_jobs.csv \
+             ${comm}_jobs.csv \
+          -p ${comp}_pstate_changes.csv \
+             ${comm}_pstate_changes.csv \
+          --off 13 --switchon -1 --switchoff -2 \
+          --names "Comp" "Comp + Comm" \
+          -o ${base_output_directory}/energy_plot.png
