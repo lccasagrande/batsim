@@ -53,76 +53,46 @@ def generate_cluster_platform(nb_hosts, output_file):
 
     wps = list()
     for f in freqs:
-        wps.append('{idle}:{moy}'.format(idle=idle_watt, moy=f["moyWatt"]))
-    wps.append('{off}:{off}'.format(off=watt_off))
-    wps.append('{on_to_off}:{on_to_off}'.format(on_to_off=watt_on_to_off))
-    wps.append('{off_to_on}:{off_to_on}'.format(off_to_on=watt_off_to_on))
+        wps.append('{idle}:{epsilon}:{moy}'
+                   .format(idle=idle_watt,
+                           epsilon=min(idle_watt*1.03,f["moyWatt"]),
+                           moy=f["moyWatt"]))
+    wps.append('{off}:{off}:{off}'.format(off=watt_off))
+    wps.append('{on_to_off}:{on_to_off}:{on_to_off}'
+               .format(on_to_off=watt_on_to_off))
+    wps.append('{off_to_on}:{off_to_on}:{off_to_on}'
+               .format(off_to_on=watt_off_to_on))
 
     watt_per_state = ", ".join(wps)
 
-    header = """
-<?xml version='1.0'?>
+    header = """<?xml version='1.0'?>
 <!DOCTYPE platform SYSTEM "http://simgrid.gforge.inria.fr/simgrid/simgrid.dtd">
 <platform version="4.1">
 
 <AS id="AS0" routing="Full">
 """
 
-    master_cluster = """
-<cluster id="cluster_master" prefix="master_host" suffix="" radical="0-0"
-             bw="125MBps" lat="50us" bb_bw="2.25GBps" bb_lat="500us"
-             speed="{speed}">
-    <!-- real pstates: {first_real_pstate} to {last_real_pstate}
-         off: pstate: {off_pstate}
-              consumption: {off_watts} W
-         shutdown: pstate: {on_to_off_pstate}
-                   time: {on_to_off_time} s,
-                   consumption: {on_to_off_watts} W
-         boot: pstate: {off_to_on_pstate}
-               time: {off_to_on_time} s,
-               consumption: {off_to_on_watts} W
-    -->
-    <prop id="watt_per_state" value="{watt_per_state}" />
-
-    <prop id="watt_off" value="{off_watts}" />
-
-    <!-- OFF : ON->OFF (shutdown) : OFF->ON (booting) -->
-    <prop id="sleep_pstates" value="{sleep_pstates}" />
-</cluster>
-""".format(speed=speed_str,
-           watt_per_state=watt_per_state,
-           sleep_pstates=sleep_pstates,
-           first_real_pstate=0, last_real_pstate=pstate_id_off - 1,
-           off_pstate=pstate_id_off,
-           on_to_off_pstate=pstate_id_on_to_off,
-           off_to_on_pstate=pstate_id_off_to_on,
-           on_to_off_time=time_on_to_off,
-           off_to_on_time=time_off_to_on,
-           off_watts=watt_off,
-           on_to_off_watts=watt_on_to_off,
-           off_to_on_watts=watt_off_to_on)
-
     compute_cluster = """
-<cluster id="cluster_compute" prefix="host" suffix="" radical="0-{max_rad}"
+    <cluster id="cluster_compute" prefix="host" suffix="" radical="0-{max_rad}"
              bw="125MBps" lat="50us" bb_bw="2.25GBps" bb_lat="500us"
              speed="{speed}">
-    <!-- real pstates: {first_real_pstate} to {last_real_pstate}
-         off: pstate: {off_pstate}
-              consumption: {off_watts} W
-         shutdown: pstate: {on_to_off_pstate}
-                   time: {on_to_off_time} s,
-                   consumption: {on_to_off_watts} W
-         boot: pstate: {off_to_on_pstate}
-               time: {off_to_on_time} s,
-               consumption: {off_to_on_watts} W
-    -->
-    <prop id="watt_per_state" value="{watt_per_state}" />
+        <!-- real pstates: {first_real_pstate} to {last_real_pstate}
+             off: pstate: {off_pstate}
+                  consumption: {off_watts} W
+             shutdown: pstate: {on_to_off_pstate}
+                       time: {on_to_off_time} s,
+                       consumption: {on_to_off_watts} W
+             boot: pstate: {off_to_on_pstate}
+                   time: {off_to_on_time} s,
+                   consumption: {off_to_on_watts} W
+        -->
+        <prop id="watt_per_state" value="{watt_per_state}" />
 
-    <prop id="watt_off" value="{off_watts}" />
+        <prop id="watt_off" value="{off_watts}" />
 
-    <!-- OFF : ON->OFF (shutdown) : OFF->ON (booting) -->
-    <prop id="sleep_pstates" value="{sleep_pstates}" />
-</cluster>
+        <!-- OFF : ON->OFF (shutdown) : OFF->ON (booting) -->
+        <prop id="sleep_pstates" value="{sleep_pstates}" />
+    </cluster>
 """.format(speed=speed_str,
            watt_per_state=watt_per_state,
            sleep_pstates=sleep_pstates,
@@ -136,6 +106,40 @@ def generate_cluster_platform(nb_hosts, output_file):
            on_to_off_watts=watt_on_to_off,
            off_to_on_watts=watt_off_to_on,
            max_rad=nb_hosts - 1)
+
+    master_cluster = """
+    <cluster id="cluster_master" prefix="master_host" suffix="" radical="0-0"
+             bw="125MBps" lat="50us" bb_bw="2.25GBps" bb_lat="500us"
+             speed="{speed}">
+        <!-- real pstates: {first_real_pstate} to {last_real_pstate}
+             off: pstate: {off_pstate}
+                  consumption: {off_watts} W
+             shutdown: pstate: {on_to_off_pstate}
+                       time: {on_to_off_time} s,
+                       consumption: {on_to_off_watts} W
+             boot: pstate: {off_to_on_pstate}
+                   time: {off_to_on_time} s,
+                   consumption: {off_to_on_watts} W
+        -->
+        <prop id="watt_per_state" value="{watt_per_state}" />
+
+        <prop id="watt_off" value="{off_watts}" />
+
+        <!-- OFF : ON->OFF (shutdown) : OFF->ON (booting) -->
+        <prop id="sleep_pstates" value="{sleep_pstates}" />
+    </cluster>
+""".format(speed=speed_str,
+           watt_per_state=watt_per_state,
+           sleep_pstates=sleep_pstates,
+           first_real_pstate=0, last_real_pstate=pstate_id_off - 1,
+           off_pstate=pstate_id_off,
+           on_to_off_pstate=pstate_id_on_to_off,
+           off_to_on_pstate=pstate_id_off_to_on,
+           on_to_off_time=time_on_to_off,
+           off_to_on_time=time_off_to_on,
+           off_watts=watt_off,
+           on_to_off_watts=watt_on_to_off,
+           off_to_on_watts=watt_off_to_on)
 
     footer = """
     <link id="backbone" bandwidth="1.25GBps" latency="500us" />
