@@ -99,6 +99,10 @@ for line in args.inputSWF:
             if args.verbose:
                 print('Job {} has been discarded'.format(job_id))
 
+submit_time_offset = 0
+if args.translate_submit_times:
+    submit_time_offset = minimum_observed_submit_time
+
 # Export JSON
 # Let's generate a list of dictionaries for the jobs
 djobs = list()
@@ -109,7 +113,7 @@ for (job_id, nb_res, run_time, submit_time, profile, walltime) in jobs:
 
     if use_job:
         djobs.append({'id': job_id,
-                      'subtime': submit_time - minimum_observed_submit_time,
+                      'subtime': submit_time - submit_time_offset,
                       'walltime': walltime, 'res': nb_res,
                       'profile': str(profile)})
 
