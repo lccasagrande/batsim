@@ -5,17 +5,21 @@
 import argparse
 import asyncio.subprocess
 import async_timeout
-import subprocess
-from execo import logger
+import coloredlogs
+import logging
 import math
 import os
 import random
 import re
 import shlex
 import stat
+import subprocess
 import sys
 import time
 import yaml
+
+logger = logging.getLogger('execute_one_instance')
+coloredlogs.install(milliseconds=True)
 
 
 class ArgumentParserError(Exception):
