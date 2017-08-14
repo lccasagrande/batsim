@@ -5,7 +5,8 @@
 import argparse
 
 
-def generate_cluster_platform(nb_hosts, output_file):
+def generate_cluster_platform(nb_hosts, output_file,
+                              set_epsilon=False):
     """Generate an energy homogeneous cluster platform."""
 
     # Information from Taurus.
@@ -53,10 +54,16 @@ def generate_cluster_platform(nb_hosts, output_file):
 
     wps = list()
     for f in freqs:
-        wps.append('{idle}:{epsilon}:{moy}'
-                   .format(idle=idle_watt,
-                           epsilon=min(idle_watt*1.03,f["moyWatt"]),
-                           moy=f["moyWatt"]))
+        if set_epsilon:
+            wps.append('{idle}:{epsilon}:{moy}'
+                       .format(idle=idle_watt,
+                               epsilon=min(idle_watt*1.03,f["moyWatt"]),
+                               moy=f["moyWatt"]))
+        else:
+            wps.append('{idle}:{moy}:{moy}'
+                       .format(idle=idle_watt,
+                               epsilon=min(idle_watt*1.03,f["moyWatt"]),
+                               moy=f["moyWatt"]))
     wps.append('{off}:{off}:{off}'.format(off=watt_off))
     wps.append('{on_to_off}:{on_to_off}:{on_to_off}'
                .format(on_to_off=watt_on_to_off))
@@ -178,9 +185,20 @@ def main():
                         help="The output file to generate",
                         required=True)
 
+    parser.add_argument('--set-epsilon', '-e',
+                        action='store_true',
+                        help='Whether the epsilon consumption should be given',
+                        required=False)
+
     args = parser.parse_args()
 
-    generate_cluster_platform(nb_hosts=args.nb, output_file=args.output)
+    set_epsilon = False
+    if args.set_epsilon:
+        set_epsilon = True
+
+    generate_cluster_platform(nb_hosts=args.nb,
+                              output_file=args.output,
+                              set_epsilon=set_epsilon)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@
 import argparse
 
 
-def generate_flat_platform(nb_hosts, output_file):
+def generate_flat_platform(nb_hosts, output_file,
+                           set_epsilon=False):
     """Generate an energy platform without network."""
     hosts_id = range(0, nb_hosts)
 
@@ -51,24 +52,40 @@ def generate_flat_platform(nb_hosts, output_file):
     time_off_to_on = 151.52
     watt_off_to_on = 18966.4228 / time_off_to_on
 
-    speed_str = "Mf, ".join([str(f["speed"]) for f in freqs]) + "Mf"
-    speed_str += ", 1e-9Mf, " + \
-        str(1.0 / time_on_to_off) + "f, " + str(1.0 / time_off_to_on) + "f"
+    speed_str = '{real_pstates}, {off}, {on_to_off}, {off_to_on}'.format(
+        real_pstates=", ".join(['{s}Mf'.format(s=f["speed"]) for f in freqs]),
+        off='1e-9Mf',
+        on_to_off='{s}f'.format(s=1.0 / time_on_to_off),
+        off_to_on='{s}f'.format(s=1.0 / time_off_to_on))
 
-    sleep_pstates = str(len(freqs)) + ":" + \
-        str(len(freqs) + 1) + ":" + str(len(freqs) + 2)
+    pstate_id_off = len(freqs)
+    pstate_id_on_to_off = pstate_id_off + 1
+    pstate_id_off_to_on = pstate_id_off + 2
 
-    ll = []
+    sleep_pstates = '{off}:{on_to_off}:{off_to_on}'.format(
+        off=pstate_id_off,
+        on_to_off=pstate_id_on_to_off,
+        off_to_on=pstate_id_off_to_on)
+
+    wps = list()
     for f in freqs:
-        ll.append(str(idle_watt) + ":" +
-                  str(f["moyWatt"]))
-    ll.append(str(watt_off) + ":" + str(watt_off) + ":" + str(watt_off))
-    ll.append(str(watt_on_to_off) + ":" +
-              str(watt_on_to_off) + ":" + str(watt_on_to_off))
-    ll.append(str(watt_off_to_on) + ":" +
-              str(watt_off_to_on) + ":" + str(watt_off_to_on))
+        if set_epsilon:
+            wps.append('{idle}:{epsilon}:{moy}'
+                       .format(idle=idle_watt,
+                               epsilon=min(idle_watt*1.03,f["moyWatt"]),
+                               moy=f["moyWatt"]))
+        else:
+            wps.append('{idle}:{moy}:{moy}'
+                       .format(idle=idle_watt,
+                               epsilon=min(idle_watt*1.03,f["moyWatt"]),
+                               moy=f["moyWatt"]))
+    wps.append('{off}:{off}:{off}'.format(off=watt_off))
+    wps.append('{on_to_off}:{on_to_off}:{on_to_off}'
+               .format(on_to_off=watt_on_to_off))
+    wps.append('{off_to_on}:{off_to_on}:{off_to_on}'
+               .format(off_to_on=watt_off_to_on))
 
-    watt_per_state = ", ".join(ll)
+    watt_per_state = ", ".join(wps)
 
     header = """
 <?xml version='1.0'?>
@@ -89,23 +106,41 @@ def generate_flat_platform(nb_hosts, output_file):
         <prop id="watt_per_state" value="100:200" />
         <prop id="watt_off" value="10" />
     </host>
-
-    <!-- The state 3 of Mercury is a sleep state.
-    When switching from a computing state to the state 3, passing by the
-    virtual pstate 4 is mandatory to simulate the time and energy consumed by
-    the switch off.
-
-    When switching from the state 3 to a computing state, passing by the
-    virtual pstate 5 is mandatory to simulate the time and energy consumed by
-    the switch on. -->
 """
 
     hosts = "".join(["""
-        <host id="host""" + str(i) + """" coordinates="0 0 0" speed=\"""" + speed_str + """" pstate="0" >
-            <prop id="watt_per_state" value=\"""" + watt_per_state + """" />
-            <prop id="watt_off" value="10" />
-            <prop id="sleep_pstates" value=\"""" + sleep_pstates + """" />
-        </host>""" for i in hosts_id])
+        <host id="host{host_i}" coordinates="0 0 0" speed="{speed}" pstate="0" >
+
+            <!-- real pstates: {first_real_pstate} to {last_real_pstate}
+             off: pstate: {off_pstate}
+                  consumption: {off_watts} W
+             shutdown: pstate: {on_to_off_pstate}
+                       time: {on_to_off_time} s,
+                       consumption: {on_to_off_watts} W
+             boot: pstate: {off_to_on_pstate}
+                   time: {off_to_on_time} s,
+                   consumption: {off_to_on_watts} W
+            -->
+            <prop id="watt_per_state" value="{watt_per_state}" />
+
+            <prop id="watt_off" value="{off_watts}" />
+
+            <!-- OFF : ON->OFF (shutdown) : OFF->ON (booting) -->
+            <prop id="sleep_pstates" value="{sleep_pstates}" />
+        </host>
+""".format(host_i=i,
+           speed=speed_str,
+           watt_per_state=watt_per_state,
+           sleep_pstates=sleep_pstates,
+           first_real_pstate=0, last_real_pstate=pstate_id_off - 1,
+           off_pstate=pstate_id_off,
+           on_to_off_pstate=pstate_id_on_to_off,
+           off_to_on_pstate=pstate_id_off_to_on,
+           on_to_off_time=time_on_to_off,
+           off_to_on_time=time_off_to_on,
+           off_watts=watt_off,
+           on_to_off_watts=watt_on_to_off,
+           off_to_on_watts=watt_off_to_on) for i in hosts_id])
 
     footer = """
 </AS>
@@ -139,7 +174,20 @@ def main():
 
     args = parser.parse_args()
 
-    generate_flat_platform(nb_hosts=args.nb, output_file=args.output)
+    parser.add_argument('--set-epsilon', '-e',
+                        action='store_true',
+                        help='Whether the epsilon consumption should be given',
+                        required=False)
+
+    args = parser.parse_args()
+
+    set_epsilon = False
+    if args.set_epsilon:
+        set_epsilon = True
+
+    generate_flat_platform(nb_hosts=args.nb,
+                           output_file=args.output,
+                           set_epsilon=set_epsilon)
 
 
 if __name__ == "__main__":

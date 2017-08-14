@@ -198,6 +198,12 @@ add_test(energy
          -bod /tmp/batsim_tests/energy
          -bwd ${CMAKE_SOURCE_DIR})
 
+add_test(energy_pform_gen
+         ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
+         ${CMAKE_SOURCE_DIR}/test/test_energy_pform_gen.yaml
+         -bod /tmp/batsim_tests/energy_pform_gen
+         -bwd ${CMAKE_SOURCE_DIR})
+
 add_test(walltime
          ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
          ${CMAKE_SOURCE_DIR}/test/test_walltime.yaml

@@ -1,0 +1,73 @@
+# This script should be called from the Batsim root directory
+base_output_directory: /tmp/batsim_tests/energy_pform_gen
+
+base_variables:
+  batsim_dir: ${base_working_directory}
+  gen_script_cluster: ${batsim_dir}/tools/energy_pform_generator_cluster.py
+  gen_script_nonet: ${batsim_dir}/tools/energy_pform_generator_homo_nonet.py
+
+implicit_instances:
+  sleeper:
+    sweep:
+      platform_size: [2, 4, 1024]
+      platform_type:
+        - {"name": "cluster", "master_host": "master_host0"}
+        - {"name": "nonet", "master_host": "master_host"}
+      workload:
+        - {"name":"energy_minimal",
+           "filename":"${batsim_dir}/workload_profiles/energy_minimal_compute.json"}
+      algo:
+        - {"name":"sleeper", "sched_name":"sleeper"}
+    generic_instance:
+      timeout: 10
+      working_directory: ${base_working_directory}
+      output_directory: ${base_output_directory}/results/${instance_id}
+      batsim_command: batsim -p ${output_directory}/platform.xml -w ${workload[filename]} -E -e ${output_directory}/out -vdebug -m ${platform_type[master_host]}
+      sched_command: batsched -v ${algo[sched_name]} --variant_options_filepath ${output_directory}/sched_input.json
+
+      commands_before_execution:
+        # Generate platform
+        - |
+            #!/usr/bin/env bash
+            set -eux
+
+            source ${output_directory}/variables.bash
+            gen_script="unset"
+
+            case ${platform_type[name]} in
+                "cluster")
+                    gen_script=${gen_script_cluster}
+                    ;;
+                "nonet")
+                    gen_script=${gen_script_nonet}
+                    ;;
+                *)
+                    (>&2 echo "Unknown platform type!")
+                    exit 1
+                    ;;
+            esac
+
+            ${gen_script} -n ${platform_size} -o ${output_directory}/platform.xml
+
+        # Generate sched input
+        - |
+            #!/usr/bin/env bash
+            set -ex
+
+            cat > ${output_directory}/sched_input.json << EOF
+            {
+              "power_sleep":9.75,
+              "power_idle":95,
+              "energy_switch_on":19030,
+              "power_compute":190.738,
+              "energy_switch_off":620,
+              "time_switch_off":6.1,
+              "pstate_sleep":13,
+              "pstate_compute":0,
+              "time_switch_on":152
+            }
+            EOF
+
+commands_before_instances:
+  - ${batsim_dir}/test/is_batsim_dir.py ${base_working_directory}
+  - ${batsim_dir}/test/clean_output_dir.py ${base_output_directory}
