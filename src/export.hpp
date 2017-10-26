@@ -46,6 +46,12 @@ public:
     WriteBuffer(const std::string & filename, int buffer_size = 64*1024);
 
     /**
+     * @brief WriteBuffers cannot be copied.
+     * @param[in] other Another instance
+     */
+    WriteBuffer(const WriteBuffer & other) = delete;
+
+    /**
      * @brief Destructor
      * @details This method flushes the buffer if it is not empty, destroys the buffer and closes the file.
      */
@@ -122,7 +128,13 @@ public:
      * @brief Builds a PajeTracer
      * @param[in] log_launchings If set to true, job launching time will be written in the trace. This option leads to larger trace files
      */
-    PajeTracer(bool log_launchings = false);
+    explicit PajeTracer(bool log_launchings = false);
+
+    /**
+     * @brief PajeTracer cannot be copied.
+     * @param[in] other Another instance
+     */
+    PajeTracer(const PajeTracer & other) = delete;
 
     /**
      * @brief Sets the filename of a PajeTracer
@@ -191,14 +203,6 @@ public:
      */
     void add_job_kill(const Job * job, const MachineRange & used_machine_ids,
                       double time, bool associate_kill_to_machines = false);
-
-    /**
-     * @brief Adds a global utilization value of the system.
-     * @details Please note that this method can only be called when the PajeTracer object has been initialized and had not been finalized yet.
-     * @param[in] utilization The global utilization of the system.
-     * @param[in] time The simulation time at which the system has this utilization value
-     */
-    void add_global_utilization(double utilization, double time);
 
 public:
     /**
@@ -271,6 +275,12 @@ public:
     PStateChangeTracer();
 
     /**
+     * @brief PStateChangeTracer cannot be copied.
+     * @param[in] other Another instance
+     */
+    PStateChangeTracer(const PStateChangeTracer & other) = delete;
+
+    /**
      * @brief Destroys a PStateChangeTracer
      * @details The output file is flushed and written
      */
@@ -314,6 +324,12 @@ public:
      * @brief Constructs a EnergyConsumptionTracer
      */
     EnergyConsumptionTracer();
+
+    /**
+     * @brief EnergyConsumptionTracer cannot be copied.
+     * @param[in] other Another instance
+     */
+    EnergyConsumptionTracer(const EnergyConsumptionTracer & other) = delete;
 
     /**
      * @brief Destroys a EnergyConsumptionTracer
@@ -392,6 +408,12 @@ public:
      * @brief Constructs a MachineStateTracer
      */
     MachineStateTracer();
+
+    /**
+     * @brief MachineStateTracer cannot be copied.
+     * @param[in] other Another instance
+     */
+    MachineStateTracer(const MachineStateTracer & other) = delete;
 
     /**
      * @brief Destroys a MachineStateTracer

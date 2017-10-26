@@ -33,8 +33,10 @@ int server_process(int argc, char *argv[])
 
     // Let's tell the Decision process that the simulation is about to begin
     // (and that some data can be read from the data storage)
-    context->proto_writer->append_simulation_begins(context->machines.nb_machines(),
-                                                    context->config_file, MSG_get_clock());
+    context->proto_writer->append_simulation_begins(context->machines,
+                                                    context->config_file,
+                                                    context->allow_time_sharing,
+                                                    MSG_get_clock());
 
     RequestReplyProcessArguments * req_rep_args = new RequestReplyProcessArguments;
     req_rep_args->context = context;
@@ -49,9 +51,13 @@ int server_process(int argc, char *argv[])
     std::map<IPMessageType, std::function<void(ServerData *, IPMessage *)>> handler_map;
     handler_map[IPMessageType::JOB_SUBMITTED] = server_on_job_submitted;
     handler_map[IPMessageType::JOB_SUBMITTED_BY_DP] = server_on_submit_job;
+    handler_map[IPMessageType::PROFILE_SUBMITTED_BY_DP] = server_on_submit_profile;
     handler_map[IPMessageType::JOB_COMPLETED] = server_on_job_completed;
     handler_map[IPMessageType::PSTATE_MODIFICATION] = server_on_pstate_modification;
     handler_map[IPMessageType::SCHED_EXECUTE_JOB] = server_on_execute_job;
+    handler_map[IPMessageType::SCHED_CHANGE_JOB_STATE] = server_on_change_job_state;
+    handler_map[IPMessageType::TO_JOB_MSG] = server_on_to_job_msg;
+    handler_map[IPMessageType::FROM_JOB_MSG] = server_on_from_job_msg;
     handler_map[IPMessageType::SCHED_REJECT_JOB] = server_on_reject_job;
     handler_map[IPMessageType::SCHED_KILL_JOB] = server_on_kill_jobs;
     handler_map[IPMessageType::SCHED_CALL_ME_LATER] = server_on_call_me_later;
@@ -66,9 +72,10 @@ int server_process(int argc, char *argv[])
     handler_map[IPMessageType::SWITCHED_ON] = server_on_switched;
     handler_map[IPMessageType::SWITCHED_OFF] = server_on_switched;
     handler_map[IPMessageType::END_DYNAMIC_SUBMIT] = server_on_end_dynamic_submit;
+    handler_map[IPMessageType::CONTINUE_DYNAMIC_SUBMIT] = server_on_continue_dynamic_submit;
 
     // Simulation loop
-    while ((data->nb_submitters == 0) ||// To enter the loop
+    while ((data->nb_submitters == 0 && !context->submission_sched_enabled) || // If dynamic submissions are not enabled: wait for the first submitter
            (data->nb_submitters_finished < data->nb_submitters) || // All submitters must have finished
            (data->nb_completed_jobs < data->nb_submitted_jobs) || // All jobs must have finished
            (!data->sched_ready) || // A scheduler answer is being injected into the simulation
@@ -205,13 +212,21 @@ void server_on_job_completed(ServerData * data,
     {
         status = "SUCCESS";
     }
-    else if (job->state == JobState::JOB_STATE_COMPLETED_KILLED && job->kill_reason == "Walltime reached")
+    else if (job->state == JobState::JOB_STATE_COMPLETED_FAILED)
+    {
+        status = "FAILED";
+    }
+    else if (job->state == JobState::JOB_STATE_COMPLETED_WALLTIME_REACHED)
     {
         status = "TIMEOUT";
     }
 
     data->context->proto_writer->append_job_completed(message->job_id.to_string(),
-                                                      status, MSG_get_clock());
+                                                      status,
+                                                      job_state_to_string(job->state),
+                                                      job->kill_reason,
+                                                      job->return_code,
+                                                      MSG_get_clock());
 
     check_submitted_and_completed(data);
 }
@@ -243,7 +258,7 @@ void server_on_job_submitted(ServerData * data,
     XBT_INFO("GOT JOB: %s %d\n", message->job_id.workload_name.c_str(), message->job_id.job_number);
     xbt_assert(data->context->workloads.job_exists(message->job_id));
     Job * job = data->context->workloads.job_at(message->job_id);
-    job->id = message->job_id.to_string();
+    job->id = message->job_id;
 
     // Update control information
     job->state = JobState::JOB_STATE_SUBMITTED;
@@ -262,7 +277,7 @@ void server_on_job_submitted(ServerData * data,
         }
     }
 
-    data->context->proto_writer->append_job_submitted(job->id, job_json_description,
+    data->context->proto_writer->append_job_submitted(job->id.to_string(), job_json_description,
                                                       profile_json_description, MSG_get_clock());
 }
 
@@ -273,8 +288,12 @@ void server_on_pstate_modification(ServerData * data,
     PStateModificationMessage * message = (PStateModificationMessage *) task_data->data;
 
     data->context->current_switches.add_switch(message->machine_ids, message->new_pstate);
-    data->context->energy_tracer.add_pstate_change(MSG_get_clock(), message->machine_ids,
-                                                   message->new_pstate);
+
+    if (data->context->energy_used)
+    {
+        data->context->energy_tracer.add_pstate_change(MSG_get_clock(), message->machine_ids,
+                                                       message->new_pstate);
+    }
 
     // Let's quickly check whether this is a switchON or a switchOFF
     // Unknown transition states will be set to -42.
@@ -289,9 +308,12 @@ void server_on_pstate_modification(ServerData * data,
         transition_state = -2; // means we are switching to a SLEEP_PSTATE
     }
 
-    // The pstate is set to an invalid one to know the machines are in transition.
-    data->context->pstate_tracer.add_pstate_change(MSG_get_clock(), message->machine_ids,
-                                                   transition_state);
+    if (data->context->energy_used)
+    {
+        // The pstate is set to an invalid one to know the machines are in transition.
+        data->context->pstate_tracer.add_pstate_change(MSG_get_clock(), message->machine_ids,
+                                                       transition_state);
+    }
 
     // Let's mark that some switches have been requested
     data->context->nb_grouped_switches++;
@@ -458,14 +480,18 @@ void server_on_killing_done(ServerData * data,
     vector<string> job_ids_str;
     vector<string> really_killed_job_ids_str;
     job_ids_str.reserve(message->jobs_ids.size());
+    map<string, BatTask *> jobs_progress_str;
 
+    // manage job Id list
     for (const JobIdentifier & job_id : message->jobs_ids)
     {
         job_ids_str.push_back(job_id.to_string());
 
+        // store job progress from BatTask tree in str
+        jobs_progress_str[job_id.to_string()] = message->jobs_progress[job_id];
+
         const Job * job = data->context->workloads.job_at(job_id);
-        if (job->state == JobState::JOB_STATE_COMPLETED_KILLED &&
-            job->kill_reason == "Killed from killer_process (probably requested by the decision process)")
+        if (job->state == JobState::JOB_STATE_COMPLETED_KILLED)
         {
             data->nb_running_jobs--;
             xbt_assert(data->nb_running_jobs >= 0);
@@ -473,6 +499,7 @@ void server_on_killing_done(ServerData * data,
             xbt_assert(data->nb_completed_jobs + data->nb_running_jobs <= data->nb_submitted_jobs);
 
             really_killed_job_ids_str.push_back(job_id.to_string());
+
         }
     }
 
@@ -480,7 +507,7 @@ void server_on_killing_done(ServerData * data,
              boost::algorithm::join(job_ids_str, ",").c_str(),
              boost::algorithm::join(really_killed_job_ids_str, ",").c_str());
 
-    data->context->proto_writer->append_job_killed(job_ids_str, MSG_get_clock());
+    data->context->proto_writer->append_job_killed(job_ids_str, jobs_progress_str, MSG_get_clock());
     --data->nb_killers;
 
     check_submitted_and_completed(data);
@@ -491,6 +518,17 @@ void server_on_end_dynamic_submit(ServerData * data,
 {
     (void) task_data;
     data->context->submission_sched_finished = true;
+
+    check_submitted_and_completed(data);
+}
+
+void server_on_continue_dynamic_submit(ServerData * data,
+                                  IPMessage * task_data)
+{
+    (void) task_data;
+    data->context->submission_sched_finished = false;
+
+    check_submitted_and_completed(data);
 }
 
 void server_on_submit_job(ServerData * data,
@@ -537,7 +575,7 @@ void server_on_submit_job(ServerData * data,
     Job * job = Job::from_json(message->job_description, workload,
                                "Invalid JSON job submitted by the scheduler");
     workload->jobs->add_job(job);
-    job->id = JobIdentifier(workload->name, job->number).to_string();
+    job->id = JobIdentifier(workload->name, job->number);
 
     // Let's parse the profile if needed
     if (!workload->profiles->exists(job->profile))
@@ -584,10 +622,149 @@ void server_on_submit_job(ServerData * data,
             }
         }
 
-        data->context->proto_writer->append_job_submitted(job->id, job_json_description,
+        data->context->proto_writer->append_job_submitted(job->id.to_string(), job_json_description,
                                                           profile_json_description,
                                                           MSG_get_clock());
     }
+}
+
+void server_on_submit_profile(ServerData * data,
+                          IPMessage * task_data)
+{
+    xbt_assert(task_data->data != nullptr);
+    ProfileSubmittedByDPMessage * message = (ProfileSubmittedByDPMessage *) task_data->data;
+
+    xbt_assert(data->context->submission_sched_enabled,
+               "Profile submission coming from the decision process received but the option "
+               "seems disabled... It can be activated by specifying a configuration file "
+               "to Batsim.");
+
+    // Let's create the workload if it doesn't exist, or retrieve it otherwise
+    Workload * workload = nullptr;
+    if (data->context->workloads.exists(message->workload_name))
+    {
+        workload = data->context->workloads.at(message->workload_name);
+    }
+    else
+    {
+        workload = new Workload(message->workload_name);
+        data->context->workloads.insert_workload(workload->name, workload);
+    }
+
+    if (!workload->profiles->exists(message->profile_name))
+    {
+        XBT_INFO("Adding user-submitted profile %s to workload %s",
+                message->profile_name.c_str(),
+                message->workload_name.c_str());
+        Profile * profile = Profile::from_json(message->profile_name,
+                                               message->profile,
+                                               "Invalid JSON profile received from the scheduler");
+        workload->profiles->add_profile(message->profile_name, profile);
+    }
+}
+
+void server_on_change_job_state(ServerData * data,
+                                IPMessage * task_data)
+{
+    xbt_assert(task_data->data != nullptr);
+    ChangeJobStateMessage * message = (ChangeJobStateMessage *) task_data->data;
+
+    Job * job = data->context->workloads.job_at(message->job_id);
+
+    XBT_INFO("Change job state: Job %d (workload=%s) to state %s (kill_Reason=%s)",
+             job->number, job->workload->name.c_str(),
+             message->job_state.c_str(), message->kill_reason.c_str());
+
+    JobState new_state = job_state_from_string(message->job_state);
+
+    switch (job->state)
+    {
+    case JobState::JOB_STATE_SUBMITTED:
+        switch (new_state)
+        {
+        case JobState::JOB_STATE_RUNNING:
+            job->starting_time = MSG_get_clock();
+            data->nb_running_jobs++;
+            xbt_assert(data->nb_running_jobs <= data->nb_submitted_jobs);
+            break;
+        case JobState::JOB_STATE_REJECTED:
+            data->nb_completed_jobs++;
+            xbt_assert(data->nb_completed_jobs + data->nb_running_jobs <= data->nb_submitted_jobs);
+            break;
+        default:
+            xbt_assert(false,
+                       "Can only change the state of a submitted job to running or rejected. "
+                       "State was %s", job_state_to_string(job->state).c_str());
+        }
+        break;
+    case JobState::JOB_STATE_RUNNING:
+        switch (new_state)
+        {
+        case JobState::JOB_STATE_COMPLETED_SUCCESSFULLY:
+        case JobState::JOB_STATE_COMPLETED_FAILED:
+        case JobState::JOB_STATE_COMPLETED_WALLTIME_REACHED:
+        case JobState::JOB_STATE_COMPLETED_KILLED:
+            job->runtime = MSG_get_clock() - job->starting_time;
+            data->nb_running_jobs--;
+            xbt_assert(data->nb_running_jobs >= 0);
+            data->nb_completed_jobs++;
+            xbt_assert(data->nb_completed_jobs + data->nb_running_jobs <= data->nb_submitted_jobs);
+            break;
+        default:
+            xbt_assert(false,
+                       "Can only change the state of a running job to completed "
+                       "(successfully, failed, and killed). State was %s",
+                       job_state_to_string(job->state).c_str());
+        }
+        break;
+    default:
+        xbt_assert(false,
+                   "Can only change the state of a submitted or running job. State was %s",
+                   job_state_to_string(job->state).c_str());
+    }
+
+    job->state = new_state;
+    job->kill_reason = message->kill_reason;
+
+    XBT_INFO("Job state changed: Job %d (workload=%s)",
+             job->number, job->workload->name.c_str());
+
+    check_submitted_and_completed(data);
+}
+
+void server_on_to_job_msg(ServerData * data,
+                          IPMessage * task_data)
+{
+    xbt_assert(task_data->data != nullptr);
+    ToJobMessage * message = (ToJobMessage *) task_data->data;
+
+    Job * job = data->context->workloads.job_at(message->job_id);
+
+    XBT_INFO("Send message to job: Job %d (workload=%s) message=%s",
+             job->number, job->workload->name.c_str(),
+             message->message.c_str());
+
+    job->incoming_message_buffer.push_back(message->message);
+
+    check_submitted_and_completed(data);
+}
+
+void server_on_from_job_msg(ServerData * data,
+                          IPMessage * task_data)
+{
+    xbt_assert(task_data->data != nullptr);
+    FromJobMessage * message = (FromJobMessage *) task_data->data;
+
+    Job * job = data->context->workloads.job_at(message->job_id);
+
+    XBT_INFO("Send message to scheduler: Job %d (workload=%s)",
+             job->number, job->workload->name.c_str());
+
+    data->context->proto_writer->append_from_job_message(message->job_id.to_string(),
+                                                         message->message,
+                                                         MSG_get_clock());
+
+    check_submitted_and_completed(data);
 }
 
 void server_on_reject_job(ServerData * data,
@@ -629,9 +806,7 @@ void server_on_kill_jobs(ServerData * data,
         if (!job->kill_requested)
         {
             // Let's check the job state
-            xbt_assert(job->state == JobState::JOB_STATE_RUNNING ||
-                       job->state == JobState::JOB_STATE_COMPLETED_SUCCESSFULLY ||
-                       job->state == JobState::JOB_STATE_COMPLETED_KILLED,
+            xbt_assert(job->state == JobState::JOB_STATE_RUNNING || job->is_complete(),
                        "Invalid KILL_JOB: job_id '%s' refers to a job not being executed nor completed.",
                        job_id.to_string().c_str());
 
@@ -680,7 +855,7 @@ void server_on_execute_job(ServerData * data,
     Job * job = data->context->workloads.job_at(allocation->job_id);
     xbt_assert(job->state == JobState::JOB_STATE_SUBMITTED,
                "Cannot execute job '%s': its state (%d) is not JOB_STATE_SUBMITTED.",
-               job->id.c_str(), job->state);
+               job->id.to_string().c_str(), job->state);
 
     job->state = JobState::JOB_STATE_RUNNING;
 
@@ -721,25 +896,34 @@ void server_on_execute_job(ServerData * data,
         }
     }
 
+    xbt_assert((int)allocation->mapping.size() == job->required_nb_res,
+               "Invalid job %s allocation. The job requires %d machines but only %d were given (%s). "
+               "Using a different number of machines is only allowed if a custom mapping is specified. "
+               "This mapping must specify which allocated machine each executor should use.",
+               job->id.to_string().c_str(), job->required_nb_res, (int)allocation->mapping.size(),
+               allocation->machine_ids.to_string_hyphen().c_str());
+
     // Let's generate the hosts used by the job
     allocation->hosts.clear();
-    allocation->hosts.reserve(allocation->machine_ids.size());
-    int host_i = 0;
-    for (auto machine_it = allocation->machine_ids.elements_begin();
-         machine_it != allocation->machine_ids.elements_end();
-         ++machine_it, ++host_i)
+    allocation->hosts.reserve(job->required_nb_res);
+
+    for (unsigned int executor_id = 0; executor_id < allocation->mapping.size(); ++executor_id)
     {
-        int machine_id = *machine_it;
+        int machine_id_within_allocated_resources = allocation->mapping[executor_id];
+        int machine_id = allocation->machine_ids[machine_id_within_allocated_resources];
+
         allocation->hosts.push_back(data->context->machines[machine_id]->host);
     }
-    xbt_assert(allocation->hosts.size() == allocation->machine_ids.size(),
-               "Invalid number of hosts");
+
+    xbt_assert((int)allocation->hosts.size() == job->required_nb_res,
+               "Invalid number of hosts (expected %d, got %d)",
+               job->required_nb_res, (int)allocation->hosts.size());
 
     ExecuteJobProcessArguments * exec_args = new ExecuteJobProcessArguments;
     exec_args->context = data->context;
     exec_args->allocation = allocation;
     exec_args->notify_server_at_end = true;
-    string pname = "job_" + job->id;
+    string pname = "job_" + job->id.to_string();
     msg_process_t process = MSG_process_create(pname.c_str(), execute_job_process,
                                                (void*)exec_args,
                                                data->context->machines[allocation->machine_ids.first_element()]->host);

@@ -68,6 +68,9 @@ std::string ip_message_type_to_string(IPMessageType type)
         case IPMessageType::JOB_SUBMITTED_BY_DP:
             s = "JOB_SUBMITTED_BY_DP";
             break;
+        case IPMessageType::PROFILE_SUBMITTED_BY_DP:
+            s = "PROFILE_SUBMITTED_BY_DP";
+            break;
         case IPMessageType::JOB_COMPLETED:
             s = "JOB_COMPLETED";
             break;
@@ -76,6 +79,9 @@ std::string ip_message_type_to_string(IPMessageType type)
             break;
         case IPMessageType::SCHED_EXECUTE_JOB:
             s = "SCHED_EXECUTE_JOB";
+            break;
+        case IPMessageType::SCHED_CHANGE_JOB_STATE:
+            s = "SCHED_CHANGE_JOB_STATE";
             break;
         case IPMessageType::SCHED_REJECT_JOB:
             s = "SCHED_REJECT_JOB";
@@ -121,6 +127,15 @@ std::string ip_message_type_to_string(IPMessageType type)
             break;
         case IPMessageType::END_DYNAMIC_SUBMIT:
             s = "END_DYNAMIC_SUBMIT";
+            break;
+        case IPMessageType::CONTINUE_DYNAMIC_SUBMIT:
+            s = "CONTINUE_DYNAMIC_SUBMIT";
+            break;
+        case IPMessageType::TO_JOB_MSG:
+            s = "TO_JOB_MSG";
+            break;
+        case IPMessageType::FROM_JOB_MSG:
+            s = "FROM_JOB_MSG";
     }
 
     return s;
@@ -154,6 +169,11 @@ IPMessage::~IPMessage()
             JobSubmittedByDPMessage * msg = (JobSubmittedByDPMessage *) data;
             delete msg;
         } break;
+        case IPMessageType::PROFILE_SUBMITTED_BY_DP:
+        {
+            ProfileSubmittedByDPMessage * msg = (ProfileSubmittedByDPMessage *) data;
+            delete msg;
+        } break;
         case IPMessageType::JOB_COMPLETED:
         {
             JobCompletedMessage * msg = (JobCompletedMessage *) data;
@@ -168,6 +188,11 @@ IPMessage::~IPMessage()
         {
             ExecuteJobMessage * msg = (ExecuteJobMessage *) data;
             // The Allocations themselves are not memory-deallocated there but at the end of the job execution.
+            delete msg;
+        } break;
+        case IPMessageType::SCHED_CHANGE_JOB_STATE:
+        {
+            ChangeJobStateMessage * msg = (ChangeJobStateMessage *) data;
             delete msg;
         } break;
         case IPMessageType::SCHED_REJECT_JOB:
@@ -236,6 +261,19 @@ IPMessage::~IPMessage()
         } break;
         case IPMessageType::END_DYNAMIC_SUBMIT:
         {
+        } break;
+        case IPMessageType::CONTINUE_DYNAMIC_SUBMIT:
+        {
+        } break;
+        case IPMessageType::TO_JOB_MSG:
+        {
+            ToJobMessage * msg = (ToJobMessage *) data;
+            delete msg;
+        } break;
+        case IPMessageType::FROM_JOB_MSG:
+        {
+            FromJobMessage * msg = (FromJobMessage *) data;
+            delete msg;
         } break;
     }
 

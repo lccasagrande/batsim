@@ -3,6 +3,26 @@
  * @brief Batsim's entry point
  */
 
+/** @def STR_HELPER(x)
+ *  @brief Helper macro to retrieve the string view of a macro.
+ */
+#define STR_HELPER(x) #x
+
+/** @def STR(x)
+ *  @brief Macro to get a const char* from a macro
+ */
+#define STR(x) STR_HELPER(x)
+
+/** @def BATSIM_VERSION
+ *  @brief What batsim --version should return.
+ *
+ *  It is either set by CMake or set to vUNKNOWN_PLEASE_COMPILE_VIA_CMAKE
+**/
+#ifndef BATSIM_VERSION
+    #define BATSIM_VERSION vUNKNOWN_PLEASE_COMPILE_VIA_CMAKE
+#endif
+
+
 #include <sys/types.h>
 #include <stdio.h>
 #include <argp.h>
@@ -36,6 +56,8 @@
 #include "server.hpp"
 #include "workload.hpp"
 #include "workflow.hpp"
+
+#include "unittest/test_main.hpp"
 
 #include "docopt/docopt.h"
 
@@ -127,7 +149,8 @@ string generate_sha1_string(std::string string_to_hash, int output_length)
     return result;
 }
 
-bool parse_main_args(int argc, char * argv[], MainArguments & main_args)
+void parse_main_args(int argc, char * argv[], MainArguments & main_args, int & return_code,
+                     bool & run_simulation, bool & run_unit_tests)
 {
     static const char usage[] =
 R"(A tool to simulate (via SimGrid) the behaviour of scheduling algorithms.
@@ -138,6 +161,9 @@ Usage:
                             [--WS (<cut_workflow_file> <start_time>)...]
                             [options]
   batsim --help
+  batsim --version
+  batsim --simgrid-version
+  batsim --unittest
 
 Input options:
   -p --platform <platform_file>     The SimGrid platform to simulate.
@@ -202,23 +228,49 @@ Other options:
                                     without scheduler nor Redis.
   --pfs-host <pfs_host>             The name of the host, in <platform_file>,
                                     which will be the parallel filesystem target
-                                    as data sink/source [default: pfs_host].
+                                    as data sink/source for the large-capacity
+                                    storage tier [default: pfs_host].
+  --hpst-host <hpst_host>           The name of the host, in <platform_file>,
+                                    which will be the parallel filesystem target
+                                    as data sink/source for the high-performance
+                                    storage tier [default: hpst_host].
   -h --help                         Shows this help.
-  --version                         Shows Batsim version.
 )";
 
-    map<string, docopt::value> args = docopt::docopt(usage, { argv + 1, argv + argc }, true, "2.0");
+    run_simulation = false,
+    run_unit_tests = false;
+    return_code = 1;
+    map<string, docopt::value> args = docopt::docopt(usage, { argv + 1, argv + argc },
+                                                     true, STR(BATSIM_VERSION));
 
     // Let's do some checks on the arguments!
     bool error = false;
+    return_code = 0;
+
+    if (args["--simgrid-version"].asBool())
+    {
+        int sg_major, sg_minor, sg_patch;
+        sg_version_get(&sg_major, &sg_minor, &sg_patch);
+
+        printf("%d.%d.%d\n", sg_major, sg_minor, sg_patch);
+        return;
+    }
+
+    if (args["--unittest"].asBool())
+    {
+        run_unit_tests = true;
+        return;
+    }
 
     // Input files
     // ***********
     main_args.platform_filename = args["--platform"].asString();
+    printf("platform_filename: %s\n", main_args.platform_filename.c_str());
     if (!file_exists(main_args.platform_filename))
     {
         XBT_ERROR("Platform file '%s' cannot be read.", main_args.platform_filename.c_str());
         error = true;
+        return_code |= 0x01;
     }
 
     // Workloads
@@ -229,6 +281,7 @@ Other options:
         {
             XBT_ERROR("Workload file '%s' cannot be read.", workload_file.c_str());
             error = true;
+            return_code |= 0x02;
         }
         else
         {
@@ -250,6 +303,7 @@ Other options:
         {
             XBT_ERROR("Workflow file '%s' cannot be read.", workflow_file.c_str());
             error = true;
+            return_code |= 0x04;
         }
         else
         {
@@ -275,6 +329,7 @@ Other options:
                   "sizes (%zu and %zu)", cut_workflow_files.size(),
                   cut_workflow_times.size());
         error = true;
+        return_code |= 0x08;
     }
     else
     {
@@ -286,6 +341,7 @@ Other options:
             {
                 XBT_ERROR("Cut workflow file '%s' cannot be read.", cut_workflow_file.c_str());
                 error = true;
+                return_code |= 0x10;
             }
             else
             {
@@ -302,6 +358,7 @@ Other options:
                         XBT_ERROR("<start_time> %g ('%s') should be positive.",
                                   desc.start_time, cut_workflow_time_str.c_str());
                         error = true;
+                        return_code |= 0x20;
                     }
                     else
                     {
@@ -315,6 +372,7 @@ Other options:
                     XBT_ERROR("Cannot read the <start_time> '%s' as a double.",
                               cut_workflow_time_str.c_str());
                     error = true;
+                    return_code |= 0x40;
                 }
             }
         }
@@ -391,7 +449,9 @@ Other options:
     {
         main_args.verbosity = verbosity_level_from_string(args["--verbosity"].asString());
         if (args["--quiet"].asBool())
+        {
             main_args.verbosity = VerbosityLevel::QUIET;
+        }
     }
     catch (const std::exception &)
     {
@@ -432,8 +492,9 @@ Other options:
         main_args.program_type = ProgramType::BATSIM;
     }
     main_args.pfs_host_name = args["--pfs-host"].asString();
+    main_args.hpst_host_name = args["--hpst-host"].asString();
 
-    return !error;
+    run_simulation = !error;
 }
 
 void configure_batsim_logging_output(const MainArguments & main_args)
@@ -613,9 +674,20 @@ int main(int argc, char * argv[])
 {
     // Let's parse command-line arguments
     MainArguments main_args;
-    if (!parse_main_args(argc, argv, main_args))
+    int return_code = 1;
+    bool run_simulation = false;
+    bool run_unittests = false;
+
+    parse_main_args(argc, argv, main_args, return_code, run_simulation, run_unittests);
+
+    if (run_unittests)
     {
-        return 1;
+        test_entry_point();
+    }
+
+    if (!run_simulation)
+    {
+        return return_code;
     }
 
     // Let's configure how Batsim should be logged
@@ -813,11 +885,17 @@ void set_configuration(BatsimContext *context,
     // Let's override configuration values from main arguments if needed
     // *****************************************************************
     if (main_args.redis_hostname != "None")
+    {
         redis_hostname = main_args.redis_hostname;
+    }
     if (main_args.redis_port != -1)
+    {
         redis_port = main_args.redis_port;
+    }
     if (main_args.redis_prefix != "None")
+    {
         redis_prefix = main_args.redis_prefix;
+    }
 
     // *************************************
     // Let's update the BatsimContext values

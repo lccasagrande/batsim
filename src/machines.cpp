@@ -54,12 +54,19 @@ Machines::~Machines()
         _pfs_machine = nullptr;
     }
 
+    if (_hpst_machine != nullptr)
+    {
+        delete _hpst_machine;
+        _hpst_machine = nullptr;
+    }
+
 }
 
 void Machines::create_machines(xbt_dynar_t hosts,
                                const BatsimContext *context,
                                const string & master_host_name,
                                const string & pfs_host_name,
+                               const string & hpst_host_name,
                                int limit_machine_count)
 {
     xbt_assert(_machines.size() == 0, "Bad call to Machines::createMachines(): machines already created");
@@ -76,6 +83,14 @@ void Machines::create_machines(xbt_dynar_t hosts,
         machine->name = sg_host_get_name(host);
         machine->host = host;
         machine->jobs_being_computed = {};
+
+        auto properties_dict = MSG_host_get_properties(machine->host);
+        xbt_dict_cursor_t cursor = nullptr;
+        char *prop_key = nullptr;
+        char *prop_value = nullptr;
+        xbt_dict_foreach(properties_dict, cursor, prop_key, prop_value) {
+            machine->properties[string(prop_key)] = string(prop_value);
+        }
 
         if (context->energy_used)
         {
@@ -211,7 +226,7 @@ void Machines::create_machines(xbt_dynar_t hosts,
                        "is currently forbidden (https://github.com/oar-team/batsim/issues/21).");
         }
 
-        if ((machine->name != master_host_name) && (machine->name != pfs_host_name))
+        if ((machine->name != master_host_name) && (machine->name != pfs_host_name) && (machine->name != hpst_host_name))
         {
             machine->id = id;
             ++id;
@@ -225,12 +240,21 @@ void Machines::create_machines(xbt_dynar_t hosts,
                 machine->id = -1;
                 _master_machine = machine;
             }
-            else
+            else if (machine->name == pfs_host_name)
             {
-
                 xbt_assert(_pfs_machine == nullptr, "There are two pfs hosts...");
                 machine->id = -2;
                 _pfs_machine = machine;
+            }
+            else if (machine->name == hpst_host_name)
+            {
+                xbt_assert(_hpst_machine == nullptr, "There are two hpst hosts...");
+                machine->id = -3;
+                _hpst_machine = machine;
+            }
+            else
+            {
+                xbt_die("Invalid machine found");
             }
         }
     }
@@ -240,6 +264,10 @@ void Machines::create_machines(xbt_dynar_t hosts,
     if (_pfs_machine == nullptr)
     {
          XBT_WARN("Could not find pfs_host '%s'!", pfs_host_name.c_str());
+    }
+    if (_hpst_machine == nullptr)
+    {
+         XBT_WARN("Could not find hpst_host '%s'!", hpst_host_name.c_str());
     }
 
     sort_machines_by_ascending_name();
@@ -321,7 +349,22 @@ const Machine *Machines::pfs_machine() const
     return _pfs_machine;
 }
 
+bool Machines::has_pfs_machine() const
+{
+    return _pfs_machine != nullptr;
+}
 
+const Machine *Machines::hpst_machine() const
+{
+    xbt_assert(_hpst_machine != nullptr,
+               "Trying to access the hpst machine, which does not exist.");
+    return _hpst_machine;
+}
+
+bool Machines::has_hpst_machine() const
+{
+    return _hpst_machine != nullptr;
+}
 
 long double Machines::total_consumed_energy(const BatsimContext *context) const
 {
@@ -530,7 +573,7 @@ void Machine::display_machine(bool is_energy_used) const
     vector<string> jobs_vector;
     for (auto & job : jobs_being_computed)
     {
-        jobs_vector.push_back(job->id);
+        jobs_vector.push_back(job->id.to_string());
     }
 
     string str = "Machine\n";
@@ -585,7 +628,7 @@ string Machine::jobs_being_computed_as_string() const
 
     for (auto & job : jobs_being_computed)
     {
-        jobs_strings.push_back(job->id);
+        jobs_strings.push_back(job->id.to_string());
     }
 
     return boost::algorithm::join(jobs_strings, ", ");
@@ -605,50 +648,87 @@ void Machine::update_machine_state(MachineState new_state)
     last_state_change_date = current_date;
 }
 
-bool string_including_integers_comparator(const std::string & s1, const std::string & s2)
+int string_numeric_comparator(const std::string & s1, const std::string & s2)
 {
-    int c1 = 0;
-    int c2 = 0;
+    // Const C strings for s1 and s2
+    const char * const_c_s1 = s1.c_str();
+    const char * const_c_s2 = s2.c_str();
 
-    int size1 = s1.length();
-    int size2 = s2.length();
+    // Iterators
+    char * p1 = const_cast<char *>(const_c_s1);
+    char * p2 = const_cast<char *>(const_c_s2);
 
-    for ( ; c1 < size1 && c2 < size2; )
+    // End bounds (precompute for the sake of performance)
+    const char * s1_end = p1 + s1.size();
+    const char * s2_end = p2 + s2.size();
+
+    // Traverse the two strings until at least one of them is at end
+    for ( ; p1 < s1_end && p2 < s2_end; )
     {
-        if (isdigit(s1[c1]) && isdigit(s2[c2]))
+        // Digits are encountered. The integer value is used as a symbol instead of the character.
+        if (isdigit(*p1) && isdigit(*p2))
         {
-            int int1 = atoi(&s1[c1]);
-            int int2 = atoi(&s2[c2]);
+            // The numeric value is read via strtol, which tells where it stopped its reading
+            char * end_p1;
+            char * end_p2;
+
+            long int int1 = strtol(p1, &end_p1, 10);
+            long int int2 = strtol(p2, &end_p2, 10);
+
+            xbt_assert(int1 != LONG_MIN && int1 != LONG_MAX,
+                       "Numeric overflow while reading %s", const_c_s1);
+            xbt_assert(int2 != LONG_MIN && int1 != LONG_MAX,
+                       "Numeric overflow while reading %s", const_c_s2);
 
             if (int1 != int2)
             {
-                return int1 < int2;
+                return int1 - int2;
             }
 
-            int int1_length = log10(int1) + 1;
-            int int2_length = log10(int2) + 1;
-
-            c1 += int1_length;
-            c2 += int2_length;
+            // The string traversal is pursued where strtol stopped
+            p1 = end_p1;
+            p2 = end_p2;
         }
         else
         {
-            if (s1[c1] != s2[c2])
+            // Classical character by character comparison
+            if (*p1 != *p2)
             {
-                return s1[c1] < s2[c2];
+                return *p1 - *p2;
             }
 
-            ++c1;
-            ++c2;
+            // The string traversal is pursued on the next characters
+            ++p1;
+            ++p2;
         }
     }
 
-    return s1.length() < s2.length();
+    if (p1 < s1_end)
+    {
+        // S1 is not at end (but S2 is since the loop condition is false)
+        return 1;
+    }
+    else if (p2 < s2_end)
+    {
+        // S2 is not at end (but S1 is since the loop condition is false)
+        return -1;
+    }
+    else
+    {
+        // Both strings are at end. They are equal.
+        return 0;
+    }
 }
 
 bool machine_comparator_name(const Machine *m1, const Machine *m2)
 {
-    return string_including_integers_comparator(m1->name, m2->name);
+    int cmp_ret = string_numeric_comparator(m1->name, m2->name);
+
+    // If the strings are identical in the numeric meaning, they are compared lexicographically
+    if (cmp_ret == 0)
+        cmp_ret = strcmp(m1->name.c_str(), m2->name.c_str());
+
+    return cmp_ret <= 0;
 }
 
 
@@ -660,11 +740,13 @@ void create_machines(const MainArguments & main_args,
 
     XBT_INFO("Creating the machines from platform file '%s'...", main_args.platform_filename.c_str());
     XBT_INFO("Looking for master host '%s'", main_args.master_host_name.c_str());
-    XBT_INFO("Looking for parallel file system host '%s'", main_args.pfs_host_name.c_str());
+    XBT_INFO("Looking for parallel file system host (LCST) '%s'", main_args.pfs_host_name.c_str());
+    XBT_INFO("Looking for parallel file system host (HPST) '%s'", main_args.hpst_host_name.c_str());
 
     xbt_dynar_t hosts = MSG_hosts_as_dynar();
     context->machines.create_machines(hosts, context, main_args.master_host_name,
-                                      main_args.pfs_host_name, max_nb_machines_to_use);
+                                      main_args.pfs_host_name, main_args.hpst_host_name,
+                                      max_nb_machines_to_use);
     xbt_dynar_free(&hosts);
 
     XBT_INFO("The machines have been created successfully. There are %d computing machines.",

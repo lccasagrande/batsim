@@ -131,15 +131,32 @@ Any custom information can be added into the
 [Batsim configuration](./configuration.md), which gives a generic way to give
 metainformation from Batsim to any scheduler at runtime.
 
-- **data**: the number of resources
+- **data**:
+  - **nb_resources**: the number of resources
+  - **allow_time_sharing**: whether time sharing is enabled or not
+  - **config**: the Batsim configuration
+  - **resources_data**: information about the resources
+    - **id**: unique resource number
+    - **name**: resource name
+    - **state**: resource state in {sleeping, idle, computing, switching_on, switching_off}
+    - **properties**: the properties specified in the SimGrid platform for the corresponding host
 - **example**:
 ```json
 {
   "timestamp": 0.0,
   "type": "SIMULATION_BEGINS",
   "data": {
-    "nb_resources": 60,
-    "config":{}
+    "allow_time_sharing": false,
+    "nb_resources": 1,
+    "config": {},
+    "resources_data": [
+      {
+        "id": 0,
+        "name": "host0",
+        "state": "idle",
+        "properties": {}
+      }
+    ]
   }
 }
 ```
@@ -235,20 +252,41 @@ A job has completed its execution. It acknowledges that the actions coming
 from a previous [EXECUTE_JOB](#execute_job) message have been done (successfully
 or not, depending on whether the job completed without reaching timeout).
 
-- **data**: a job id string with a status string (TIMEOUT, SUCCESS)
+- **data**:
+  - **job_id**: the job unique identifier
+  - **status**: whether SUCCESS or TIMEOUT (**DEPRECATED**)
+  - **job_state**: the job state. Possible values: "NOT_SUBMITTED", "SUBMITTED", "RUNNING", "COMPLETED_SUCCESSFULLY", "COMPLETED_FAILED", "COMPLETED_WALLTIME_REACHED", "COMPLETED_KILLED", "REJECTED"
+  - **kill_reason**: the kill reason (if any)
 - **example**:
 ```json
 {
-  "timestamp": 10.0,
+  "timestamp": 10.000000,
   "type": "JOB_COMPLETED",
-  "data": {"job_id": "w0!1", "status": "SUCCESS"}
+  "data": {
+    "job_id": "2cf8ca!10",
+    "status": "TIMEOUT",
+    "job_state": "COMPLETED_KILLED",
+    "kill_reason": "Walltime reached"
+  }
 }
 ```
 
 ### JOB_KILLED
 
-Some jobs have been killed. It acknowledges that the actions coming from a
-previous [KILL_JOB](#kill_job) message have been done.
+Some jobs have been killed.
+It acknowledges that the actions coming from a previous [KILL_JOB](#kill_job)
+message have been done.
+The ``job_ids`` jobs correspond to those requested in the previous
+[KILL_JOB](#kill_job) message)
+
+The ``job_progress`` map is also given for the all the jobs and tasks
+inside the job that have been killed. Key is the ``job_id`` and the value
+contains a progress value that in \]0, 1\[ with 0 for not started and 1 for
+complete task and the profile name is also given for convenience. For
+sequential job the progress map contains the 0-based index of the inner
+task that was running at the time it was killed and the details of this
+progress in the ``current_task`` field. Note that sequential jobs can be
+nested.
 
 Please remark that this message does not necessarily means that all the jobs
 have been killed. It means that all the jobs have completed. Some of the jobs
@@ -263,7 +301,53 @@ event.
 {
   "timestamp": 10.0,
   "type": "JOB_KILLED",
-  "data": {"job_ids": ["w0!1", "w0!2"]}
+  "data": {
+    "job_ids": [
+      "w0!1",
+      "w0!2"
+    ]
+  }
+}
+```
+
+- **data**: A list of job ids + progress
+- **example**:
+```json
+{
+  "timestamp": 10.0,
+  "type": "JOB_KILLED",
+  "data": {
+    "job_ids": [
+      "w0!1",
+      "w0!2"
+    ],
+    "job_progress": {
+      "w0!1": {
+        "profile": "my_simple_profile",
+        "progress": 0.52
+      },
+      "w0!2": {
+        "profile": "my_sequential_profile",
+        "current_task_index": 3,
+        "current_task": {
+          "profile": "my_simple_profile",
+          "progress": 0.52
+        }
+      },
+      "w0!3": {
+        "profile": "my_composed_profile",
+        "current_task_index": 2,
+        "current_task": {
+          "profile": "my_sequential_profile",
+          "current_task_index": 3,
+          "current_task": {
+            "profile": "my_simple_profile",
+            "progress": 0.52
+          }
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -354,6 +438,7 @@ state (or whatever you want to know...). The supported requests are:
 ### REJECT_JOB
 
 Rejects a job that has already been submitted.
+The rejected job will not appear into the final jobs trace.
 
 - **data**: A job id
 - **example**:
@@ -464,6 +549,33 @@ in the configuration
 }
 ```
 
+### SUBMIT_PROFILE
+
+Submits a profile (from the scheduler). Job submissions from the scheduler must
+be enabled in the [configuration](./configuration.md)
+(``{"job_submission": {"from_scheduler": {"enabled": true}}``).
+
+- **data**: A workload name, profile name, and the data of the profile.
+
+- **with redis** : Instead of using this message, the profiles should be pushed
+  to redis directly by the scheduler.
+
+- **example without redis** : the whole profile description goes through the protocol.
+```json
+{
+  "timestamp": 10.0,
+  "type": "SUBMIT_PROFILE",
+  "data": {
+    "workload_name": "dyn_wl1",
+    "profile_name":  "delay_10s",
+    "profile": {
+      "type": "delay",
+      "delay": 10
+    }
+  }
+}
+```
+
 ### SET_RESOURCE_STATE
 
 Sets some resources into a state.
@@ -479,11 +591,17 @@ Sets some resources into a state.
 ```
 
 ### NOTIFY
-The scheduler notify Batsim of something. For example, that job submission
-from the scheduler is over, so Batsim is able to stop the simulation.  This
-message **must** be sent if ``"scheduler_submission": {"enabled": false}``
+The scheduler notifies Batsim of something.
+
+For example, the ``submission_finished`` notifies that job submissions
+from the scheduler are over, which allows Batsim to stop the simulation.
+This message **must** be sent if ``"scheduler_submission": {"enabled": false}``
 is configured. See [Configuration documentation](./configuration.md) for more
 details.
+If the scheduler realizes that it commited the mistake of notifying
+``submission_finished`` prematurely, the ``continue_submission`` notification
+can be sent to make the scheduler able to submit dynamic jobs again.
+
 
 - **data**: empty
 - **example**:
@@ -492,6 +610,23 @@ details.
   "timestamp": 42.0,
   "type": "NOTIFY",
   "data": { "type": "submission_finished" }
+}
+```
+
+### CHANGE_JOB_STATE
+
+Changes the state of a job, which may be helpful to implement schedulers with
+dynamic complex jobs.
+
+``` json
+{
+  "timestamp": 42.0,
+  "type": "CHANGE_JOB_STATE",
+  "data": {
+    "job_id": "w12!45",
+    "job_state": "COMPLETED_KILLED",
+    "kill_reason": "Sub-jobs were killed."
+  }
 }
 ```
 

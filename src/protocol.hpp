@@ -9,6 +9,7 @@
 #include <rapidjson/writer.h>
 
 #include "machine_range.hpp"
+#include "machines.hpp"
 #include "ipp.hpp"
 
 struct BatsimContext;
@@ -24,7 +25,7 @@ public:
      * @brief Constructor
      * @param[in,out] os The output stream
      */
-    Writer(OutputStream& os) : rapidjson::Writer<OutputStream>(os), os_(&os)
+    explicit Writer(OutputStream& os) : rapidjson::Writer<OutputStream>(os), os_(&os)
     {
     }
 
@@ -45,7 +46,9 @@ public:
         RAPIDJSON_ASSERT(ret < buf_size - 1);
 
         for (int i = 0; i < ret; ++i)
+        {
             os_->Put(buffer[i]);
+        }
 
         delete[] buffer;
         return ret < (buf_size - 1);
@@ -69,12 +72,14 @@ public:
     // Messages from Batsim to the Scheduler
     /**
      * @brief Appends a SIMULATION_BEGINS event.
-     * @param[in] nb_resources The number of simulated resources
+     * @param[in] machines The machines usable to compute jobs
      * @param[in] configuration The simulation configuration
+     * @param[in] allow_time_sharing Whether time sharing is enabled
      * @param[in] date The event date. Must be greater than or equal to the previous event.
      */
-    virtual void append_simulation_begins(int nb_resources,
+    virtual void append_simulation_begins(Machines & machines,
                                           const rapidjson::Document & configuration,
+                                          bool allow_time_sharing,
                                           double date) = 0;
 
     /**
@@ -100,19 +105,37 @@ public:
      * @brief Appends a JOB_COMPLETED event.
      * @param[in] job_id The identifier of the job that has completed.
      * @param[in] job_status The job status
+     * @param[in] job_state The job state
+     * @param[in] kill_reason The kill reason (if any)
+     * @param[in] return_code The job return code
      * @param[in] date The event date. Must be greater than or equal to the previous event.
      */
     virtual void append_job_completed(const std::string & job_id,
                                       const std::string & job_status,
+                                      const std::string & job_state,
+                                      const std::string & kill_reason,
+                                      int return_code,
                                       double date) = 0;
 
     /**
      * @brief Appends a JOB_KILLED event.
      * @param[in] job_ids The identifiers of the jobs that have been killed.
      * @param[in] date The event date. Must be greater than or equal to the previous event.
+     * @param[in] job_progress Contains the progress of each job that has really been killed.
      */
     virtual void append_job_killed(const std::vector<std::string> & job_ids,
+                                   const std::map<std::string, BatTask *> & job_progress,
                                    double date) = 0;
+
+    /**
+     * @brief Appends a FROM_JOB_MSG event.
+     * @param[in] job_id The identifier of the job which sends the message.
+     * @param[in] message The message to be sent to the scheduler.
+     * @param[in] date The event date. Must be greater than or equal to the previous event.
+     */
+    virtual void append_from_job_message(const std::string & job_id,
+                                         const rapidjson::Document & message,
+                                         double date) = 0;
 
     /**
      * @brief Appends a RESOURCE_STATE_CHANGED event.
@@ -169,7 +192,13 @@ public:
      * @brief Creates an empty JsonProtocolWriter
      * @param[in,out] context The BatsimContext
      */
-    JsonProtocolWriter(BatsimContext * context);
+    explicit JsonProtocolWriter(BatsimContext * context);
+
+    /**
+     * @brief JsonProtocolWriter cannot be copied.
+     * @param[in] other Another instance
+     */
+    JsonProtocolWriter(const JsonProtocolWriter & other) = delete;
 
     /**
      * @brief Destroys a JsonProtocolWriter
@@ -179,12 +208,14 @@ public:
     // Messages from Batsim to the Scheduler
     /**
      * @brief Appends a SIMULATION_BEGINS event.
-     * @param[in] nb_resources The number of simulated resources
+     * @param[in] machines The machines usable to compute jobs
      * @param[in] configuration The simulation configuration
+     * @param[in] allow_time_sharing Whether time sharing is enabled
      * @param[in] date The event date. Must be greater than or equal to the previous event.
      */
-    void append_simulation_begins(int nb_resources,
+    void append_simulation_begins(Machines & machines,
                                   const rapidjson::Document & configuration,
+                                  bool allow_time_sharing,
                                   double date);
 
     /**
@@ -210,19 +241,37 @@ public:
      * @brief Appends a JOB_COMPLETED event.
      * @param[in] job_id The identifier of the job that has completed.
      * @param[in] job_status The job status
+     * @param[in] job_state The job state
+     * @param[in] kill_reason The kill reason (if any)
+     * @param[in] return_code The job return code
      * @param[in] date The event date. Must be greater than or equal to the previous event.
      */
     void append_job_completed(const std::string & job_id,
                               const std::string & job_status,
+                              const std::string & job_state,
+                              const std::string & kill_reason,
+                              int return_code,
                               double date);
 
     /**
      * @brief Appends a JOB_KILLED event.
      * @param[in] job_ids The identifiers of the jobs that have been killed.
      * @param[in] date The event date. Must be greater than or equal to the previous event.
+     * @param[in] job_progress Contains the progress of each job that has really been killed.
      */
     void append_job_killed(const std::vector<std::string> & job_ids,
+                           const std::map<std::string, BatTask *> & job_progress,
                            double date);
+
+    /**
+     * @brief Appends a FROM_JOB_MSG event.
+     * @param[in] job_id The identifier of the job which sends the message.
+     * @param[in] message The message to be sent to the scheduler.
+     * @param[in] date The event date. Must be greater than or equal to the previous event.
+     */
+    void append_from_job_message(const std::string & job_id,
+                                 const rapidjson::Document & message,
+                                 double date);
 
     /**
      * @brief Appends a RESOURCE_STATE_CHANGED event.
@@ -269,13 +318,21 @@ public:
     bool is_empty() { return _is_empty; }
 
 private:
+    /**
+     * @brief Converts a machine to a json value.
+     * @param[in] machine The machine to be converted
+     * @return The json value
+     */
+    rapidjson::Value machine_to_json_value(const Machine & machine);
+
+private:
     BatsimContext * _context; //!< The BatsimContext
     bool _is_empty = true; //!< Stores whether events have been pushed into the writer since last clear.
     double _last_date = -1; //!< The date of the latest pushed event/message
     rapidjson::Document _doc; //!< A rapidjson document
     rapidjson::Document::AllocatorType & _alloc; //!< The allocated of _doc
     rapidjson::Value _events = rapidjson::Value(rapidjson::kArrayType); //!< A rapidjson array in which the events are pushed
-    const std::vector<std::string> accepted_completion_statuses = {"SUCCESS", "TIMEOUT"}; //!< The list of accepted statuses for the JOB_COMPLETED message
+    const std::vector<std::string> accepted_completion_statuses = {"SUCCESS", "FAILED", "TIMEOUT"}; //!< The list of accepted statuses for the JOB_COMPLETED message
 };
 
 
@@ -308,7 +365,13 @@ public:
      * @brief Constructor
      * @param[in] context The BatsimContext
      */
-    JsonProtocolReader(BatsimContext * context);
+    explicit JsonProtocolReader(BatsimContext * context);
+
+    /**
+     * @brief JsonProtocolReader cannot be copied.
+     * @param[in] other Another instance
+     */
+    JsonProtocolReader(const JsonProtocolReader & other) = delete;
 
     /**
      * @brief Destructor
@@ -355,6 +418,14 @@ public:
     void handle_execute_job(int event_number, double timestamp, const rapidjson::Value & data_object);
 
     /**
+     * @brief Handles an CHANGE_JOB_STATE event
+     * @param[in] event_number The event number in [0,nb_events[.
+     * @param[in] timestamp The event timestamp
+     * @param[in] data_object The data associated with the event (JSON object)
+     */
+    void handle_change_job_state(int event_number, double timestamp, const rapidjson::Value & data_object);
+
+    /**
      * @brief Handles a CALL_ME_LATER event
      * @param[in] event_number The event number in [0,nb_events[.
      * @param[in] timestamp The event timestamp
@@ -379,12 +450,28 @@ public:
     void handle_notify(int event_number, double timestamp, const rapidjson::Value & data_object);
 
     /**
+     * @brief Handles a TO_JOB_MSG event
+     * @param[in] event_number The event number in [0,nb_events[.
+     * @param[in] timestamp The event timestamp
+     * @param[in] data_object The data associated with the event (JSON object)
+     */
+    void handle_to_job_msg(int event_number, double timestamp, const rapidjson::Value & data_object);
+
+    /**
      * @brief Handles a SUBMIT_JOB event
      * @param[in] event_number The event number in [0,nb_events[.
      * @param[in] timestamp The event timestamp
      * @param[in] data_object The data associated with the event (JSON object)
      */
     void handle_submit_job(int event_number, double timestamp, const rapidjson::Value & data_object);
+
+    /**
+     * @brief Handles a SUBMIT_PROFILE event
+     * @param[in] event_number The event number in [0,nb_events[.
+     * @param[in] timestamp The event timestamp
+     * @param[in] data_object The data associated with the event (JSON object)
+     */
+    void handle_submit_profile(int event_number, double timestamp, const rapidjson::Value & data_object);
 
     /**
      * @brief Handles a KILL_JOB event

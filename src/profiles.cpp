@@ -159,6 +159,15 @@ Profile::~Profile()
             d = nullptr;
         }
     }
+    else if (type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_TOTAL_AMOUNT)
+    {
+        MsgParallelHomogeneousTotalAmountProfileData * d = (MsgParallelHomogeneousTotalAmountProfileData *) data;
+        if (d != nullptr)
+        {
+            delete d;
+            d = nullptr;
+        }
+    }
     else if (type == ProfileType::SMPI)
     {
         SmpiProfileData * d = (SmpiProfileData *) data;
@@ -177,9 +186,36 @@ Profile::~Profile()
             d = nullptr;
         }
     }
-    else if (type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS0)
+    else if (type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS_MULTIPLE_TIERS)
     {
-        MsgParallelHomogeneousPFS0ProfileData * d = (MsgParallelHomogeneousPFS0ProfileData *) data;
+        MsgParallelHomogeneousPFSMultipleTiersProfileData * d = (MsgParallelHomogeneousPFSMultipleTiersProfileData *) data;
+        if (d != nullptr)
+        {
+            delete d;
+            d = nullptr;
+        }
+    }
+    else if (type == ProfileType::MSG_DATA_STAGING)
+    {
+        MsgDataStagingProfileData * d = (MsgDataStagingProfileData *) data;
+        if (d != nullptr)
+        {
+            delete d;
+            d = nullptr;
+        }
+    }
+    else if (type == ProfileType::SCHEDULER_SEND)
+    {
+        SchedulerSendProfileData * d = (SchedulerSendProfileData *) data;
+        if (d != nullptr)
+        {
+            delete d;
+            d = nullptr;
+        }
+    }
+    else if (type == ProfileType::SCHEDULER_RECV)
+    {
+        SchedulerRecvProfileData * d = (SchedulerRecvProfileData *) data;
         if (d != nullptr)
         {
             delete d;
@@ -202,6 +238,7 @@ Profile *Profile::from_json(const std::string & profile_name,
     (void) error_prefix; // Avoids a warning if assertions are ignored
 
     Profile * profile = new Profile;
+    profile->name = profile_name;
 
     xbt_assert(json_desc.IsObject(), "%s: profile '%s' value must be an object",
                error_prefix.c_str(), profile_name.c_str());
@@ -211,6 +248,14 @@ Profile *Profile::from_json(const std::string & profile_name,
                error_prefix.c_str(), profile_name.c_str());
 
     string profile_type = json_desc["type"].GetString();
+
+    int return_code = 0;
+    if (json_desc.HasMember("ret"))
+    {
+        return_code = json_desc["ret"].GetInt();
+    }
+    profile->return_code = return_code;
+
     if (profile_type == "delay")
     {
         profile->type = ProfileType::DELAY;
@@ -297,16 +342,43 @@ Profile *Profile::from_json(const std::string & profile_name,
 
         profile->data = data;
     }
+    else if (profile_type == "msg_par_hg_tot")
+    {
+        profile->type = ProfileType::MSG_PARALLEL_HOMOGENEOUS_TOTAL_AMOUNT;
+        MsgParallelHomogeneousTotalAmountProfileData * data = new MsgParallelHomogeneousTotalAmountProfileData;
+
+        xbt_assert(json_desc.HasMember("cpu"), "%s: profile '%s' has no 'cpu' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        xbt_assert(json_desc["cpu"].IsNumber(), "%s: profile '%s' has a non-number 'cpu' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        data->cpu = json_desc["cpu"].GetDouble();
+        xbt_assert(data->cpu >= 0, "%s: profile '%s' has a non-positive 'cpu' field (%g)",
+                   error_prefix.c_str(), profile_name.c_str(), data->cpu);
+
+        xbt_assert(json_desc.HasMember("com"), "%s: profile '%s' has no 'com' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        xbt_assert(json_desc["com"].IsNumber(), "%s: profile '%s' has a non-number 'com' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        data->com = json_desc["com"].GetDouble();
+        xbt_assert(data->com >= 0, "%s: profile '%s' has a non-positive 'com' field (%g)",
+                   error_prefix.c_str(), profile_name.c_str(), data->com);
+
+        profile->data = data;
+    }
     else if (profile_type == "composed")
     {
         profile->type = ProfileType::SEQUENCE;
         SequenceProfileData * data = new SequenceProfileData;
 
-        xbt_assert(json_desc.HasMember("nb"), "%s: profile '%s' has no 'nb' field",
+        int repeat = 1;
+        if (json_desc.HasMember("nb"))
+        {
+            xbt_assert(json_desc["nb"].IsInt(), "%s: profile '%s' has a non-integral 'nb' field",
                    error_prefix.c_str(), profile_name.c_str());
-        xbt_assert(json_desc["nb"].IsInt(), "%s: profile '%s' has a non-integral 'nb' field",
-                   error_prefix.c_str(), profile_name.c_str());
-        data->repeat = json_desc["nb"].GetInt();
+            repeat = json_desc["nb"].GetInt();
+        }
+        data->repeat = repeat;
+
         xbt_assert(data->repeat > 0, "%s: profile '%s' has a non-strictly-positive 'nb' field (%d)",
                    error_prefix.c_str(), profile_name.c_str(), data->repeat);
 
@@ -325,10 +397,10 @@ Profile *Profile::from_json(const std::string & profile_name,
 
         profile->data = data;
     }
-    else if (profile_type == "msg_par_hg_pfs0")
+    else if (profile_type == "msg_par_hg_pfs_tiers" || profile_type == "msg_par_hg_pfs0")
     {
-        profile->type = ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS0;
-        MsgParallelHomogeneousPFS0ProfileData * data = new MsgParallelHomogeneousPFS0ProfileData;
+        profile->type = ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS_MULTIPLE_TIERS;
+        MsgParallelHomogeneousPFSMultipleTiersProfileData * data = new MsgParallelHomogeneousPFSMultipleTiersProfileData;
 
         xbt_assert(json_desc.HasMember("size"), "%s: profile '%s' has no 'size' field",
                    error_prefix.c_str(), profile_name.c_str());
@@ -338,6 +410,166 @@ Profile *Profile::from_json(const std::string & profile_name,
         xbt_assert(data->size >= 0, "%s: profile '%s' has a non-positive 'size' field (%g)",
                    error_prefix.c_str(), profile_name.c_str(), data->size);
 
+        if (json_desc.HasMember("direction"))
+        {
+            xbt_assert(json_desc["direction"].IsString(),
+                       "%s: profile '%s' has a non-string 'direction' field",
+                       error_prefix.c_str(), profile_name.c_str());
+            string direction = json_desc["direction"].GetString();
+
+            if (direction == "to_storage")
+            {
+                data->direction = MsgParallelHomogeneousPFSMultipleTiersProfileData::Direction::TO_STORAGE;
+            }
+            else if (direction == "from_storage")
+            {
+                data->direction = MsgParallelHomogeneousPFSMultipleTiersProfileData::Direction::FROM_STORAGE;
+            }
+            else
+            {
+                xbt_assert(false, "%s: profile '%s' has an invalid 'direction' field (%s)",
+                           error_prefix.c_str(), profile_name.c_str(), direction.c_str());
+            }
+        }
+        else
+        {
+            data->direction = MsgParallelHomogeneousPFSMultipleTiersProfileData::Direction::TO_STORAGE;
+        }
+
+        if (json_desc.HasMember("host"))
+        {
+            xbt_assert(json_desc["host"].IsString(),
+                       "%s: profile '%s' has a non-string 'host' field",
+                       error_prefix.c_str(), profile_name.c_str());
+            string host = json_desc["host"].GetString();
+            if (host == "HPST")
+            {
+                data->host = MsgParallelHomogeneousPFSMultipleTiersProfileData::Host::HPST;
+            }
+            else if (host == "LCST" || host == "PFS")
+            {
+                data->host = MsgParallelHomogeneousPFSMultipleTiersProfileData::Host::LCST;
+            }
+            else
+            {
+                xbt_assert(false, "%s: profile '%s' has an invalid 'host' field (%s)",
+                           error_prefix.c_str(), profile_name.c_str(), host.c_str());
+            }
+        }
+        else
+        {
+            data->host = MsgParallelHomogeneousPFSMultipleTiersProfileData::Host::LCST;
+        }
+
+        profile->data = data;
+    }
+    else if (profile_type == "data_staging")
+    {
+        profile->type = ProfileType::MSG_DATA_STAGING;
+        MsgDataStagingProfileData * data = new MsgDataStagingProfileData;
+
+        xbt_assert(json_desc.HasMember("size"), "%s: profile '%s' has no 'size' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        xbt_assert(json_desc["size"].IsNumber(), "%s: profile '%s' has a non-number 'size' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        data->size = json_desc["size"].GetDouble();
+        xbt_assert(data->size >= 0, "%s: profile '%s' has a non-positive 'size' field (%g)",
+                   error_prefix.c_str(), profile_name.c_str(), data->size);
+
+        xbt_assert(json_desc.HasMember("direction"), "%s: profile '%s' has no 'direction' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        xbt_assert(json_desc["direction"].IsString(),
+                   "%s: profile '%s' has a non-string 'direction' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        string direction = json_desc["direction"].GetString();
+
+        if (direction == std::string("hpst_to_lcst"))
+        {
+            data->direction = MsgDataStagingProfileData::Direction::HPST_TO_LCST;
+        }
+        else if (direction == std::string("lcst_to_hpst"))
+        {
+            data->direction = MsgDataStagingProfileData::Direction::LCST_TO_HPST;
+        }
+        else
+        {
+            xbt_assert(false, "%s: profile '%s' has an invalid 'direction' field (%s)",
+                       error_prefix.c_str(), profile_name.c_str(), direction.c_str());
+        }
+
+        profile->data = data;
+    }
+    else if (profile_type == "send")
+    {
+        profile->type = ProfileType::SCHEDULER_SEND;
+        SchedulerSendProfileData * data = new SchedulerSendProfileData;
+
+        xbt_assert(json_desc.HasMember("msg"), "%s: profile '%s' has no 'msg' field",
+                   error_prefix.c_str(), profile_name.c_str());
+        xbt_assert(json_desc["msg"].IsObject(), "%s: profile '%s' field 'msg' is no object",
+                   error_prefix.c_str(), profile_name.c_str());
+
+        data->message.CopyFrom(json_desc["msg"], data->message.GetAllocator());
+
+        if (json_desc.HasMember("sleeptime"))
+        {
+            xbt_assert(json_desc["sleeptime"].IsNumber(),
+                       "%s: profile '%s' has a non-number 'sleeptime' field",
+                       error_prefix.c_str(), profile_name.c_str());
+            data->sleeptime = json_desc["sleeptime"].GetDouble();
+            xbt_assert(data->sleeptime > 0,
+                       "%s: profile '%s' has a non-positive 'sleeptime' field (%g)",
+                       error_prefix.c_str(), profile_name.c_str(), data->sleeptime);
+        }
+        else
+        {
+            data->sleeptime = 0.0000001;
+        }
+        profile->data = data;
+    }
+    else if (profile_type == "recv")
+    {
+        profile->type = ProfileType::SCHEDULER_RECV;
+        SchedulerRecvProfileData * data = new SchedulerRecvProfileData;
+
+        data->regex = string(".*");
+        if (json_desc.HasMember("regex"))
+        {
+            data->regex = json_desc["regex"].GetString();
+        }
+
+        data->on_success = string("");
+        if (json_desc.HasMember("success"))
+        {
+            data->on_success = json_desc["success"].GetString();
+        }
+
+        data->on_failure = string("");
+        if (json_desc.HasMember("failure"))
+        {
+            data->on_failure = json_desc["failure"].GetString();
+        }
+
+        data->on_timeout = string("");
+        if (json_desc.HasMember("timeout"))
+        {
+            data->on_timeout = json_desc["timeout"].GetString();
+        }
+
+        if (json_desc.HasMember("polltime"))
+        {
+            xbt_assert(json_desc["polltime"].IsNumber(),
+                       "%s: profile '%s' has a non-number 'polltime' field",
+                       error_prefix.c_str(), profile_name.c_str());
+            data->polltime = json_desc["polltime"].GetDouble();
+            xbt_assert(data->polltime > 0,
+                       "%s: profile '%s' has a non-positive 'polltime' field (%g)",
+                       error_prefix.c_str(), profile_name.c_str(), data->polltime);
+        }
+        else
+        {
+            data->polltime = 0.005;
+        }
         profile->data = data;
     }
     else if (profile_type == "smpi")
@@ -405,4 +637,55 @@ Profile *Profile::from_json(const std::string & profile_name,
                error_prefix.c_str(), json_str.c_str());
 
     return Profile::from_json(profile_name, doc, error_prefix, false);
+}
+
+bool Profile::is_parallel_task() const
+{
+    return (type == ProfileType::MSG_PARALLEL) ||
+           (type == ProfileType::MSG_PARALLEL_HOMOGENEOUS) ||
+           (type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_TOTAL_AMOUNT) ||
+           (type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS_MULTIPLE_TIERS) ||
+           (type == ProfileType::MSG_DATA_STAGING);
+}
+
+
+std::string profile_type_to_string(const ProfileType & type)
+{
+    string str = "unset";
+
+    switch(type)
+    {
+    case ProfileType::DELAY:
+        str = "DELAY";
+        break;
+    case ProfileType::MSG_PARALLEL:
+        str = "MSG_PARALLEL";
+        break;
+    case ProfileType::MSG_PARALLEL_HOMOGENEOUS:
+        str = "MSG_PARALLEL_HOMOGENEOUS";
+        break;
+    case ProfileType::MSG_PARALLEL_HOMOGENEOUS_TOTAL_AMOUNT:
+        str = "MSG_PARALLEL_HOMOGENEOUS_TOTAL_AMOUNT";
+        break;
+    case ProfileType::SMPI:
+        str = "SMPI";
+        break;
+    case ProfileType::SEQUENCE:
+        str = "SEQUENCE";
+        break;
+    case ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS_MULTIPLE_TIERS:
+        str = "MSG_PARALLEL_HOMOGENEOUS_PFS_MULTIPLE_TIERS";
+        break;
+    case ProfileType::MSG_DATA_STAGING:
+        str = "MSG_DATA_STAGING";
+        break;
+    case ProfileType::SCHEDULER_SEND:
+        str = "SCHEDULER_SEND";
+        break;
+    case ProfileType::SCHEDULER_RECV:
+        str = "SCHEDULER_RECV";
+        break;
+    }
+
+    return str;
 }

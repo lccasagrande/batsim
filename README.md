@@ -1,22 +1,26 @@
 Batsim
 ======
 
-Batsim is a Batch Scheduler Simulator. A Batch scheduler -- AKA Resources and
-Jobs Management System (RJMS) -- is a system that manages resources in
-large-scale computing centers, notably by scheduling and placing jobs, and by
-setting up energy policies.
+Batsim is a Batch scheduler simulator.  
+A batch scheduler -- AKA Resources and Jobs Management System (RJMS) --
+is a system that manages resources in large-scale computing centers,
+notably by scheduling and placing jobs, and by setting up energy policies.  
+Batsim is open source and distributed under LGPL-3.0 license.
+See [copyright](copyright) for more details.
 
-Batsim simulates the computing center behaviour. It is made such that any
-event-based scheduling algorithm can be plugged to it. Thus, it permits to
-compare decision algorithms coming from production and academics worlds.
+![Batsim overview figure]
 
-Here is an overview of how Batsim works compared to real executions.
-
-![Batsim vs. real]
+Batsim simulates a computing center behavior.  
+It is made such that any event-based scheduling algorithm can be plugged to it.  
+Thus, it allows to compare decision algorithms coming from production and
+academics worlds.
 
 Quick links
 -----------
-- The [contribute](doc/contribute.md) page tells how to contribute to Batsim
+- Please read our [contribution guidelines](CONTRIBUTING.md) if you want to
+  contribute to Batsim
+- The [changelog](doc/changelog.md) summarizes information about the project
+  evolution.
 - Tutorials shows how to use Batsim and how it works:
   - The [usage tutorial](doc/tuto_usage.md) explains how to execute a Batsim
     simulation, and how to setup a development docker environment
@@ -67,11 +71,27 @@ External References
 * Batsim internal documentation can be found
   [there](http://batsim.gforge.inria.fr/).
 
-Build status
+Build and code status
 ------------
 
-[![build status](https://gitlab.inria.fr/batsim/batsim/badges/master/build.svg)]
-(https://gitlab.inria.fr/batsim/batsim/commits/master)
+
+| [master][master-link] | [upstream_sg (recent SimGrid)][upstream_sg-link] | [codacy][codacy-link] |
+| :-------------------: | :----------------------------------------------: | :-------------------: |
+| ![master-badge]       | ![upstream_sg-badge]                             | ![codacy-badge]       |
+
+[master-badge]: https://gricad-gitlab.univ-grenoble-alpes.fr/batsim/batsim/badges/master/build.svg "Gitlab CI build status (master branch)"
+[master-link]:  https://gricad-gitlab.univ-grenoble-alpes.fr/batsim/batsim/pipelines "Gitlab CI build status"
+[upstream_sg-badge]: https://gricad-gitlab.univ-grenoble-alpes.fr/batsim/batsim/badges/upstream_sg/build.svg "Gitlab CI build status (upstream_sg branch)"
+[upstream_sg-link]:  https://gricad-gitlab.univ-grenoble-alpes.fr/batsim/batsim/pipelines "Gitlab CI build status"
+[codacy-badge]: https://api.codacy.com/project/badge/Grade/e5990f2e9abc4573b13a0b8c9d9e0f08 "Codacy code style"
+[codacy-link]: https://www.codacy.com/app/mpoquet/batsim/dashboard
+
+Batsim uses Gitlab CI as its continuous integration system.  
+Build status of the different commits can be found
+[there][batsim ci].  
+More information about our CI setup can be found
+[there](./doc/continuous_integration.md).
+
 
 Development environment
 -------------------------
@@ -118,11 +138,15 @@ Also, some tools can be found in the [tools](./tools) directory:
 Write your own scheduler (or adapt an existing one)
 ---------------------------------------------------
 
-As Batsim is using a text-based protocol, your scheduler has to implement this
-protocol: For more detail on the protocol, see [protocol description].
+Schedulers must follow a text-based protocol to communicate with Batsim.  
+More details about the protocol can be found in the [protocol description].
 
-A good starting point is Pybatsim which helps you to easily implement your
-scheduling policy in Python. See the [pybatsim folder] for more details.
+You may also base your work on existing Batsim-compatible schedulers:
+- C++: [batsched][batsched gitlab]
+- D: [datsched][datsched gitlab]
+- Perl: [there][perl sched repo] (deprecated)
+- Python: [pybatsim][pybatsim gitlab]
+- Rust: [there][rust sched repo]
 
 Installation
 ------------
@@ -132,7 +156,7 @@ Installation
 
 Batsim uses [Kameleon](http://kameleon.imag.fr/index.html) to build controlled
 environments. These environments allow us to generate Docker containers, which
-are used by [our CI](https://gitlab.inria.fr/batsim/batsim/pipelines) to test
+are used by [our CI][batsim ci] to test
 whether Batsim can be built correctly and whether some integration tests pass.
 
 Thus, the most up-to-date information about how to build Batsim dependencies
@@ -150,7 +174,9 @@ please note it might be outdated.
 Batsim dependencies are listed below:
 -   SimGrid. dev version is recommended (e96681fb8 for example).
     To use SMPI jobs, use commit 587483ebe of
-    [mpoquet's fork](https://github.com/mpoquet/simgrid/)
+    [mpoquet's fork](https://github.com/mpoquet/simgrid/).
+    To use energy, please consider using the Batsim upstream_sg branch and
+    SimGrid commit e96681fb8.
 -   RapidJSON (1.02 or greater)
 -   Boost 1.62 or greater (system, filesystem, regex, locale)
 -   C++11 compiler
@@ -263,10 +289,16 @@ Other options:
 If you want to run more complex scenarios, giving a look at our
 [experiment tools](./tools/experiments) may save you some time!
 
-[Batsim vs. real]: ./doc/batsim_overview.png
+[Batsim overview figure]: ./doc/batsim_rjms_overview.png
 [./publications/Batsim\_JSSPP\_2016.pdf]: ./publications/Batsim_JSSPP_2016.pdf
 [Evalys]: https://github.com/oar-team/evalys
 [Vite]: http://vite.gforge.inria.fr/
 [protocol description]: ./doc/proto_description.md
-[pybatsim folder]: ./schedulers/pybatsim/
 [oar3]: https://github.com/oar-team/oar3
+
+[pybatsim gitlab]: https://gitlab.inria.fr/batsim/pybatsim
+[batsched gitlab]: https://gitlab.inria.fr/batsim/batsched
+[datsched gitlab]: https://gitlab.inria.fr/batsim/datsched
+[rust sched repo]: https://gitlab.inria.fr/adfaure/schedulers
+[perl sched repo]: https://github.com/fernandodeperto/batch-simulator
+[batsim ci]: https://gricad-gitlab.univ-grenoble-alpes.fr/batsim/batsim/pipelines

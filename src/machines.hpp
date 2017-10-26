@@ -43,7 +43,7 @@ struct Machine
      * @brief Constructs a Machine
      * @param[in] machines The Machines instances the Machine is within
      */
-    Machine(Machines * machines);
+    explicit Machine(Machines * machines);
 
     /**
      * @brief Destroys a Machine
@@ -62,6 +62,8 @@ struct Machine
 
     Rational last_state_change_date = 0; //!< The time at which the last state change has been done
     std::map<MachineState, Rational> time_spent_in_each_state; //!< The cumulated time of the machine in each MachineState
+
+    std::map<std::string, std::string> properties; //!< Properties defined in the platform file
 
     /**
      * @brief Returns whether the Machine has the given power state
@@ -91,12 +93,12 @@ struct Machine
 
 /**
  * @brief Compares two strings. If both strings contain integers at the same place, the integers themselves are compared.
- * @details For example, "machine2" < "machine10", "machine10_12" < "machine10_153"...
+ * @details For example, "machine2" < "machine10", "machine10_12" < "machine10_153", "machine001" == "machine1"...
  * @param s1 The first string to compare
  * @param s2 The second string to compare
- * @return True if and only if s1 < s2, taking numbers into account
+ * @return Similar result than strcmp. ret<0 if s1 < s2. ret==0 if s1 == s2. Ret>0 if s1 > s2.
  */
-bool string_including_integers_comparator(const std::string & s1, const std::string & s2);
+int string_numeric_comparator(const std::string & s1, const std::string & s2);
 
 /**
  * @brief Compares two machines according to their names, taking into account numbers within them
@@ -118,6 +120,12 @@ public:
     Machines();
 
     /**
+     * @brief Machines cannot be copied.
+     * @param[in] other Another instance
+     */
+    Machines(const Machines & other) = delete;
+
+    /**
      * @brief Destroys a Machines
      */
     ~Machines();
@@ -127,13 +135,15 @@ public:
      * @param[in] hosts The SimGrid hosts
      * @param[in] context The Batsim Context
      * @param[in] master_host_name The name of the host which should be used as the Master host
-     * @param[in] pfs_host_name The name of the host which should be used as the parallel filestem host
+     * @param[in] pfs_host_name The name of the host which should be used as the parallel filestem host (large-capacity storage tier)
+     * @param[in] hpst_host_name The name of the host which should be used as the HPST host (high-performance storage tier)
      * @param[in] limit_machine_count If set to -1, all the machines are used. If set to a strictly positive number N, only the first machines N will be used to compute jobs
      */
     void create_machines(xbt_dynar_t hosts,
                          const BatsimContext * context,
                          const std::string & master_host_name,
                          const std::string & pfs_host_name,
+                         const std::string & hpst_host_name,
                          int limit_machine_count = -1);
 
     /**
@@ -209,9 +219,29 @@ public:
 
     /**
      * @brief Returns a const pointer to the Parallel File System host machine
+     * for the large-capacity storage tier.
      * @return A const pointer to the Parallel File System host machine
      */
     const Machine * pfs_machine() const;
+
+    /**
+     * @brief Returns whether or not a pfs host is registered in the system.
+     * @return Whether or not a pfs host is present
+     */
+    bool has_pfs_machine() const;
+
+    /**
+     * @brief Returns a const pointer to the Parallel File System host machine
+     * for the high-performance storage tier.
+     * @return A const pointer to the Parallel File System host machine
+     */
+    const Machine * hpst_machine() const;
+
+    /**
+     * @brief Returns whether or not a hpst host is registered in the system.
+     * @return Whether or not a hpst host is present
+     */
+    bool has_hpst_machine() const;
 
     /**
      * @brief Computes and returns the total consumed energy of all the computing machines
@@ -248,8 +278,9 @@ public:
 
 private:
     std::vector<Machine *> _machines; //!< The vector of computing machines
-    Machine * _master_machine = nullptr; //!< The Master host
-    Machine * _pfs_machine = nullptr; //!< The Master host
+    Machine * _master_machine = nullptr; //!< The master machine
+    Machine * _pfs_machine = nullptr; //!< The PFS machine
+    Machine * _hpst_machine = nullptr; //!< The HPST machine
     PajeTracer * _tracer = nullptr; //!< The PajeTracer
     std::map<MachineState, int> _nb_machines_in_each_state; //!< Counts how many machines are in each state
 };

@@ -95,7 +95,8 @@ struct MainArguments
     // Other
     bool allow_time_sharing;                                //!< Allows/forbids time sharing. Two jobs can run on the same machine if and only if time sharing is allowed.
     ProgramType program_type;                               //!< The program type (Batsim or Batexec at the moment)
-    std::string pfs_host_name;                              //!< The name of the SimGrid host which serves as parallel file system
+    std::string pfs_host_name;                              //!< The name of the SimGrid host which serves as parallel file system (a.k.a. large-capacity storage tier)
+    std::string hpst_host_name;                             //!< The name of the SimGrid host which serves as the high-performance storage tier
 };
 
 /**
@@ -103,9 +104,12 @@ struct MainArguments
  * @param[in] argc The number of arguments given to the main function
  * @param[in] argv The values of arguments given to the main function
  * @param[out] main_args Batsim usable arguments
- * @return true on success, false otherwise
+ * @param[out] return_code Batsim's return code (used directly if false is returned)
+ * @param[out] run_simulation Whether the simulation should be run afterwards
+ * @param[out] run_unit_tests Whether the unit tests should be run afterwards
  */
-bool parse_main_args(int argc, char * argv[], MainArguments & main_args);
+void parse_main_args(int argc, char * argv[], MainArguments & main_args,
+                     int & return_code, bool & run_simulation, bool & run_unit_tests);
 
 /**
  * @brief Configures how the simulation should be logged

@@ -6,45 +6,19 @@
 #pragma once
 
 #include <vector>
+#include <map>
 #include <string>
+
+#include <rapidjson/document.h>
 
 #include <simgrid/msg.h>
 
 #include "machine_range.hpp"
 
+#include "jobs.hpp"
+
 struct BatsimContext;
-struct Job;
 
-/**
- * @brief A simple structure used to identify one job
- */
-struct JobIdentifier
-{
-    /**
-     * @brief Creates a JobIdentifier
-     * @param[in] workload_name The workload name
-     * @param[in] job_number The job number
-     */
-    JobIdentifier(const std::string & workload_name = "", int job_number = -1);
-
-    std::string workload_name; //!< The name of the workload the job belongs to
-    int job_number; //!< The job unique number inside its workload
-
-    /**
-     * @brief Returns a string representation of the JobIdentifier.
-     * @details Output format is WORKLOAD_NAME!JOB_NUMBER
-     * @return A string representation of the JobIdentifier.
-     */
-    std::string to_string() const;
-};
-
-/**
- * @brief Compares two JobIdentifier thanks to their string representations
- * @param[in] ji1 The first JobIdentifier
- * @param[in] ji2 The second JobIdentifier
- * @return ji1.to_string() < ji2.to_string()
- */
-bool operator<(const JobIdentifier & ji1, const JobIdentifier & ji2);
 
 /**
  * @brief Stores the different types of inter-process messages
@@ -53,9 +27,11 @@ enum class IPMessageType
 {
     JOB_SUBMITTED           //!< Submitter -> Server. The submitter tells the server a new job has been submitted.
     ,JOB_SUBMITTED_BY_DP    //!< Scheduler -> Server. The scheduler tells the server that the decision process wants to submit a job
+    ,PROFILE_SUBMITTED_BY_DP //!< Scheduler -> Server. The scheduler tells the server that the decision process wants to submit a profile
     ,JOB_COMPLETED          //!< Launcher -> Server. The job launcher tells the server a job has been completed.
     ,PSTATE_MODIFICATION    //!< Scheduler -> Server. The scheduler tells the server a scheduling event occured (modify the state of some resources).
     ,SCHED_EXECUTE_JOB      //!< Scheduler -> Server. The scheduler tells the server a scheduling event occured (execute a job).
+    ,SCHED_CHANGE_JOB_STATE //!< Scheduler -> Server. The scheduler tells the server a scheduling event occured (change the state of a job).
     ,SCHED_REJECT_JOB       //!< Scheduler -> Server. The scheduler tells the server a scheduling event occured (reject a job).
     ,SCHED_KILL_JOB         //!< Scheduler -> Server. The scheduler tells the server a scheduling event occured (kill a job).
     ,SCHED_CALL_ME_LATER    //!< Scheduler -> Server. The scheduler tells the server a scheduling event occured (the scheduler wants to be called in the future).
@@ -71,6 +47,9 @@ enum class IPMessageType
     ,SWITCHED_ON            //!< SwitcherON -> Server. The switcherON process tells the server the machine pstate has been changed
     ,SWITCHED_OFF           //!< SwitcherOFF -> Server. The switcherOFF process tells the server the machine pstate has been changed.
     ,END_DYNAMIC_SUBMIT     //!< Scheduler -> Server. The scheduler tells the server that dynamic job submissions are finished.
+    ,CONTINUE_DYNAMIC_SUBMIT //!< Scheduler -> Server. The scheduler tells the server that dynamic job submissions continue.
+    ,TO_JOB_MSG //!< Scheduler -> Server. The scheduler sends a message to a job.
+    ,FROM_JOB_MSG //!< Job -> Server. The job wants to send a message to the scheduler via the server.
 };
 
 /**
@@ -119,11 +98,31 @@ struct JobSubmittedByDPMessage
 };
 
 /**
+ * @brief The content of the ProfileSubmittedByDPMessage message
+ */
+struct ProfileSubmittedByDPMessage
+{
+    std::string workload_name; //!< The workload name
+    std::string profile_name; //!< The profile name
+    std::string profile; //!< The submitted profile data
+};
+
+/**
  * @brief The content of the JobCompleted message
  */
 struct JobCompletedMessage
 {
     JobIdentifier job_id; //!< The JobIdentifier
+};
+
+/**
+ * @brief The content of the ChangeJobState message
+ */
+struct ChangeJobStateMessage
+{
+    JobIdentifier job_id; //!< The JobIdentifier
+    std::string job_state; //!< The new job state
+    std::string kill_reason; //!< The optional kill reason if the new job state is COMPLETED_KILLED
 };
 
 /**
@@ -213,7 +212,26 @@ struct SwitchMessage
  */
 struct KillingDoneMessage
 {
-    std::vector<JobIdentifier> jobs_ids; //!< The IDs of the jobs which have been killed
+    std::vector<JobIdentifier> jobs_ids; //!< The IDs of the jobs whose kill has been requested
+    std::map<JobIdentifier, BatTask *> jobs_progress; //!< Stores the progress of the jobs that have really been killed.
+};
+
+/**
+ * @brief The content of the ToJobMessage message
+ */
+struct ToJobMessage
+{
+    JobIdentifier job_id; //!< The JobIdentifier
+    std::string message; //!< The message to send to the job
+};
+
+/**
+ * @brief The content of the FromJobMessage message
+ */
+struct FromJobMessage
+{
+    JobIdentifier job_id; //!< The JobIdentifier
+    rapidjson::Document message; //!< The message to send to the scheduler
 };
 
 /**

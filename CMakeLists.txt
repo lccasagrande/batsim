@@ -80,6 +80,23 @@ include_directories(${LIBEV_INCLUDE_DIRS})
 find_package(ZMQ REQUIRED)
 include_directories(${ZMQ_INCLUDE_DIRS})
 
+##################
+# Batsim version #
+##################
+set(default_batsim_version "v1.4.0")
+include(GetGitRevisionDescription)
+git_describe(batsim_version)
+message(STATUS "Batsim version from git: ${batsim_version}")
+
+if(NOT((${batsim_version} STREQUAL "GIT-NOTFOUND") OR
+       (${batsim_version} STREQUAL "HEAD-HASH-NOTFOUND")))
+    add_definitions(-DBATSIM_VERSION=${batsim_version})
+else()
+    message(WARNING "Cannot retrieve Batsim version from git. "
+                    "Using default version ${default_batsim_version}")
+    add_definitions(-DBATSIM_VERSION=${default_batsim_version})
+endif()
+
 ################
 # Source files #
 ################
@@ -91,7 +108,9 @@ file(GLOB batsim_SRC
     "src/pugixml-1.7/*.hpp"
     "src/pugixml-1.7/*.cpp"
     "src/docopt/*.cpp"
-    "src/docopt/*.h")
+    "src/docopt/*.h"
+    "src/unittest/*.hpp"
+    "src/unittest/*.cpp")
 
 # Executables
 add_executable(batsim ${batsim_SRC})
@@ -301,8 +320,20 @@ add_test(kill_multiple
          -bod /tmp/batsim_tests/kill_multiple
          -bwd ${CMAKE_SOURCE_DIR})
 
+add_test(kill_progress
+         ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
+         ${CMAKE_SOURCE_DIR}/test/test_kill_progress.yaml
+         -bod /tmp/batsim_tests/kill_progress
+         -bwd ${CMAKE_SOURCE_DIR})
+
 add_test(pybatsim_tests
          ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
          ${CMAKE_SOURCE_DIR}/test/pybatsim_tests.yaml
          -bod /tmp/pybatsim_tests
+         -bwd ${CMAKE_SOURCE_DIR})
+
+add_test(fewer_resources
+         ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
+         ${CMAKE_SOURCE_DIR}/test/test_fewer_resources.yaml
+         -bod /tmp/fewer_resources
          -bwd ${CMAKE_SOURCE_DIR})

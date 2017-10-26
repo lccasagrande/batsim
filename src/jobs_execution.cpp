@@ -2,13 +2,14 @@
  * @file jobs_execution.cpp
  * @brief Contains functions related to the execution of the jobs
  */
+#include <regex>
 
 #include "jobs_execution.hpp"
 #include "jobs.hpp"
+#include "task_execution.hpp"
 
 #include <simgrid/plugins/energy.h>
 
-#include <simgrid/msg.h>
 #include <smpi/smpi.h>
 
 XBT_LOG_NEW_DEFAULT_CATEGORY(jobs_execution, "jobs_execution"); //!< Logging
@@ -38,193 +39,163 @@ int smpi_replay_process(int argc, char *argv[])
     return 0;
 }
 
-int execute_profile(BatsimContext *context,
-                    const std::string & profile_name,
-                    const SchedulingAllocation * allocation,
-                    CleanExecuteProfileData * cleanup_data,
-                    double * remaining_time)
+int execute_task(BatTask * btask,
+                 BatsimContext *context,
+                 const SchedulingAllocation * allocation,
+                 CleanExecuteTaskData * cleanup_data,
+                 double * remaining_time)
 {
-    Workload * workload = context->workloads.at(allocation->job_id.workload_name);
-    Job * job = workload->jobs->at(allocation->job_id.job_number);
-    Profile * profile = workload->profiles->at(profile_name);
-    int nb_res = job->required_nb_res;
+    Job * job = btask->parent_job;
+    Profile * profile = btask->profile;
+    int nb_res = btask->parent_job->required_nb_res;
 
-    if (profile->type == ProfileType::MSG_PARALLEL ||
-        profile->type == ProfileType::MSG_PARALLEL_HOMOGENEOUS ||
-        profile->type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS0)
+    // Init task
+    btask->parent_job = job;
+
+    if (profile->is_parallel_task())
     {
-        double * computation_amount = nullptr;
-        double * communication_amount = nullptr;
-        string task_name_prefix;
-        std::vector<msg_host_t> hosts_to_use = allocation->hosts;
-
-        if (profile->type == ProfileType::MSG_PARALLEL)
+        int return_code = execute_msg_task(btask, allocation, nb_res, remaining_time,
+                                           context, cleanup_data);
+        if (return_code != 0)
         {
-            task_name_prefix = "p ";
-            MsgParallelProfileData * data = (MsgParallelProfileData *)profile->data;
-
-            // These amounts are deallocated by SG
-            computation_amount = xbt_new(double, nb_res);
-            communication_amount = xbt_new(double, nb_res*nb_res);
-
-            // Let us retrieve the matrices from the profile
-            memcpy(computation_amount, data->cpu, sizeof(double) * nb_res);
-            memcpy(communication_amount, data->com, sizeof(double) * nb_res * nb_res);
-        }
-        else if (profile->type == ProfileType::MSG_PARALLEL_HOMOGENEOUS)
-        {
-            task_name_prefix = "phg ";
-            MsgParallelHomogeneousProfileData * data = (MsgParallelHomogeneousProfileData *)profile->data;
-
-            double cpu = data->cpu;
-            double com = data->com;
-
-            // These amounts are deallocated by SG
-            computation_amount = xbt_new(double, nb_res);
-            communication_amount = nullptr;
-            if(com > 0)
-            {
-                communication_amount = xbt_new(double, nb_res * nb_res);
-            }
-
-            // Let us fill the local computation and communication matrices
-            int k = 0;
-            for (int y = 0; y < nb_res; ++y)
-            {
-                computation_amount[y] = cpu;
-                if(communication_amount != nullptr)
-                {
-                    for (int x = 0; x < nb_res; ++x)
-                    {
-                        if (x == y)
-                        {
-                            communication_amount[k++] = 0;
-                        }
-                        else
-                        {
-                            communication_amount[k++] = com;
-                        }
-                    }
-                }
-            }
-        }
-        else if (profile->type == ProfileType::MSG_PARALLEL_HOMOGENEOUS_PFS0)
-        {
-            task_name_prefix = "pfs0 ";
-            MsgParallelHomogeneousPFS0ProfileData * data = (MsgParallelHomogeneousPFS0ProfileData *)profile->data;
-
-            double cpu = 0;
-            double size = data->size;
-
-            // The PFS machine will also be used
-            nb_res = nb_res + 1;
-            int pfs_id = nb_res - 1;
-
-            // Add the pfs_machine
-            hosts_to_use.push_back(context->machines.pfs_machine()->host);
-
-            // These amounts are deallocated by SG
-            computation_amount = xbt_new(double, nb_res);
-            communication_amount = nullptr;
-            if(size > 0)
-                communication_amount = xbt_new(double, nb_res*nb_res);
-
-            // Let us fill the local computation and communication matrices
-            int k = 0;
-            for (int y = 0; y < nb_res; ++y)
-            {
-                computation_amount[y] = cpu;
-                if(communication_amount != nullptr)
-                {
-                    for (int x = 0; x < nb_res; ++x)
-                    {
-                        // Communications are done towards the PFS host, which is the last resource
-                        if (x != pfs_id)
-                        {
-                            communication_amount[k++] = 0;
-                        }
-                        else
-                        {
-                            communication_amount[k++] = size;
-                        }
-                    }
-                }
-            }
+            return return_code;
         }
 
-        string task_name = task_name_prefix + to_string(job->number) + "'" + job->profile + "'";
-        XBT_INFO("Creating task '%s'", task_name.c_str());
-
-        msg_task_t ptask = MSG_parallel_task_create(task_name.c_str(),
-                                                    nb_res,
-                                                    hosts_to_use.data(),
-                                                    computation_amount,
-                                                    communication_amount, NULL);
-
-        // If the process gets killed, the following data may need to be freed
-        cleanup_data->task = ptask;
-
-        double time_before_execute = MSG_get_clock();
-        XBT_INFO("Executing task '%s'", MSG_task_get_name(ptask));
-        msg_error_t err = MSG_parallel_task_execute_with_timeout(ptask, *remaining_time);
-        *remaining_time = *remaining_time - (MSG_get_clock() - time_before_execute);
-
-        int ret = 1;
-        if (err == MSG_OK) {}
-        else if (err == MSG_TIMEOUT)
-        {
-            ret = 0;
-        }
-        else
-        {
-            xbt_die("A task execution had been stopped by an unhandled way (err = %d)", err);
-        }
-
-        XBT_INFO("Task '%s' finished", MSG_task_get_name(ptask));
-        MSG_task_destroy(ptask);
-
-        // The task has been executed, the data does need to be freed in the cleanup function anymore
-        cleanup_data->task = nullptr;
-
-        return ret;
+        return profile->return_code;
     }
     else if (profile->type == ProfileType::SEQUENCE)
     {
         SequenceProfileData * data = (SequenceProfileData *) profile->data;
 
-        for (int i = 0; i < data->repeat; i++)
+        // (Sequences can be repeated several times)
+        for (int sequence_iteration = 0; sequence_iteration < data->repeat; sequence_iteration++)
         {
-            for (unsigned int j = 0; j < data->sequence.size(); j++)
+            for (unsigned int profile_index_in_sequence = 0;
+                 profile_index_in_sequence < data->sequence.size();
+                 profile_index_in_sequence++)
             {
-                if (execute_profile(context, data->sequence[j], allocation,
-                                    cleanup_data, remaining_time) == 0)
+                // Traces how the execution is going so that progress can be retrieved if needed
+                btask->current_task_index = sequence_iteration * data->sequence.size() +
+                                            profile_index_in_sequence;
+                BatTask * sub_btask = new BatTask(job,
+                    job->workload->profiles->at(data->sequence[profile_index_in_sequence]));
+                btask->sub_tasks.push_back(sub_btask);
+
+                string task_name = "seq" + to_string(job->number) + "'" + job->profile + "'";
+                XBT_INFO("Creating sequential tasks '%s'", task_name.c_str());
+
+                int ret_last_profile = execute_task(sub_btask, context,  allocation,
+                                                    cleanup_data, remaining_time);
+
+                // The whole sequence fails if a subtask fails
+                if (ret_last_profile != 0)
                 {
-                    return 0;
+                    return ret_last_profile;
                 }
             }
         }
-        return 1;
+
+        return profile->return_code;
+    }
+    else if (profile->type == ProfileType::SCHEDULER_SEND)
+    {
+        SchedulerSendProfileData * data = (SchedulerSendProfileData *) profile->data;
+
+        XBT_INFO("Sending message to the scheduler");
+
+        FromJobMessage * message = new FromJobMessage;
+        message->job_id = job->id;
+        message->message.CopyFrom(data->message, message->message.GetAllocator());
+
+        send_message("server", IPMessageType::FROM_JOB_MSG, (void*)message);
+
+        if (do_delay_task(data->sleeptime, remaining_time) == -1)
+        {
+            return -1;
+        }
+
+        return profile->return_code;
+    }
+    else if (profile->type == ProfileType::SCHEDULER_RECV)
+    {
+        SchedulerRecvProfileData * data = (SchedulerRecvProfileData *) profile->data;
+
+        string profile_to_execute = "";
+        bool has_messages = false;
+
+        XBT_INFO("Trying to receive message from scheduler");
+        if (job->incoming_message_buffer.empty())
+        {
+            if (data->on_timeout == "")
+            {
+                XBT_INFO("Waiting for message from scheduler");
+                while (true)
+                {
+                    if (do_delay_task(data->polltime, remaining_time) == -1)
+                    {
+                        return -1;
+                    }
+
+                    if (!job->incoming_message_buffer.empty())
+                    {
+                        XBT_INFO("Finally got message from scheduler");
+                        has_messages = true;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                XBT_INFO("Timeout on waiting for message from scheduler");
+                profile_to_execute = data->on_timeout;
+            }
+        }
+        else
+        {
+            has_messages = true;
+        }
+
+        if (has_messages)
+        {
+            string first_message = job->incoming_message_buffer.front();
+            job->incoming_message_buffer.pop_front();
+
+            regex msg_regex(data->regex);
+            if (regex_match(first_message, msg_regex))
+            {
+                XBT_INFO("Message from scheduler matches");
+                profile_to_execute = data->on_success;
+            }
+            else
+            {
+                XBT_INFO("Message from scheduler does not match");
+                profile_to_execute = data->on_failure;
+            }
+        }
+
+        if (profile_to_execute != "")
+        {
+            XBT_INFO("Instaciate task from profile: %s", profile_to_execute.c_str());
+            int ret_last_profile = execute_task(btask, context, allocation, cleanup_data, remaining_time);
+            if (ret_last_profile != 0)
+            {
+                return ret_last_profile;
+            }
+        }
+        return profile->return_code;
     }
     else if (profile->type == ProfileType::DELAY)
     {
         DelayProfileData * data = (DelayProfileData *) profile->data;
 
-        if (data->delay < *remaining_time)
+        btask->delay_task_start = MSG_get_clock();
+        btask->delay_task_required = data->delay;
+
+        if (do_delay_task(data->delay, remaining_time) == -1)
         {
-            XBT_INFO("Sleeping the whole task length");
-            MSG_process_sleep(data->delay);
-            XBT_INFO("Sleeping done");
-            *remaining_time = *remaining_time - data->delay;
-            return 1;
+            return -1;
         }
-        else
-        {
-            XBT_INFO("Sleeping until walltime");
-            MSG_process_sleep(*remaining_time);
-            XBT_INFO("Walltime reached");
-            *remaining_time = 0;
-            return 0;
-        }
+        return profile->return_code;
     }
     else if (profile->type == ProfileType::SMPI)
     {
@@ -249,7 +220,7 @@ int execute_profile(BatsimContext *context,
         xbt_assert(nb_ranks == (int) job->smpi_ranks_to_hosts_mapping.size(),
                    "Invalid job %s: SMPI ranks_to_host mapping has an invalid size, as it should "
                    "use %d MPI ranks but the ranking states that there are %d ranks.",
-                   job->id.c_str(), nb_ranks, (int) job->smpi_ranks_to_hosts_mapping.size());
+                   job->id.to_string().c_str(), nb_ranks, (int) job->smpi_ranks_to_hosts_mapping.size());
 
         for (int i = 0; i < nb_ranks; ++i)
         {
@@ -295,11 +266,75 @@ int execute_profile(BatsimContext *context,
         }
         MSG_sem_acquire(sem);
         free(sem);
-        return 1;
+        return profile->return_code;
     }
     else
-        xbt_die("Cannot execute job %s: the profile type '%s' is unknown",
-                job->id.c_str(), job->profile.c_str());
+        xbt_die("Cannot execute job %s: the profile '%s' is of unknown type: %s",
+                job->id.to_string().c_str(), job->profile.c_str(), profile->json_description.c_str());
+
+    return 1;
+}
+
+int do_delay_task(double sleeptime, double * remaining_time)
+{
+    // if the walltime is not set or not reached
+    if (*remaining_time < 0 || sleeptime < *remaining_time)
+    {
+        XBT_INFO("Sleeping the whole task length");
+        MSG_process_sleep(sleeptime);
+        XBT_INFO("Sleeping done");
+        if (*remaining_time > 0)
+        {
+            *remaining_time = *remaining_time - sleeptime;
+        }
+        return 0;
+    }
+    else
+    {
+        XBT_INFO("Sleeping until walltime");
+        MSG_process_sleep(*remaining_time);
+        XBT_INFO("Job has reached walltime");
+        *remaining_time = 0;
+        return -1;
+    }
+}
+
+/**
+ * @brief Hook function given to simgrid to cleanup the task after its
+ * execution ends
+ * @param unknown unknown
+ * @param[in,out] data structure to clean up (cast in * CleanExecuteTaskData)
+ * @return always 0
+ */
+int execute_task_cleanup(void * unknown, void * data)
+{
+    (void) unknown;
+
+    CleanExecuteTaskData * cleanup_data = (CleanExecuteTaskData *) data;
+    xbt_assert(cleanup_data != nullptr);
+
+    XBT_DEBUG("before freeing computation amount %p", cleanup_data->computation_amount);
+    xbt_free(cleanup_data->computation_amount);
+    XBT_DEBUG("before freeing communication amount %p", cleanup_data->communication_amount);
+    xbt_free(cleanup_data->communication_amount);
+
+    if (cleanup_data->exec_process_args != nullptr)
+    {
+        XBT_DEBUG("before deleting exec_process_args->allocation %p",
+                  cleanup_data->exec_process_args->allocation);
+        delete cleanup_data->exec_process_args->allocation;
+        XBT_DEBUG("before deleting exec_process_args %p", cleanup_data->exec_process_args);
+        delete cleanup_data->exec_process_args;
+    }
+
+    if (cleanup_data->task != nullptr)
+    {
+        XBT_WARN("Not cleaning the task data to avoid a SG deadlock :(");
+        //MSG_task_destroy(cleanup_data->task);
+    }
+
+    XBT_DEBUG("before deleting cleanup_data %p", cleanup_data);
+    delete cleanup_data;
 
     return 0;
 }
@@ -330,23 +365,40 @@ int execute_job_process(int argc, char *argv[])
     args->context->machines.update_machines_on_job_run(job,
                                                        args->allocation->machine_ids,
                                                        args->context);
-    CleanExecuteProfileData * cleanup_data = new CleanExecuteProfileData;
+    // Add a cleanup hook on the process
+    CleanExecuteTaskData * cleanup_data = new CleanExecuteTaskData;
     cleanup_data->exec_process_args = args;
-    //MSG_process_on_exit(execute_profile_cleanup, cleanup_data);
-    if (execute_profile(args->context, job->profile, args->allocation, cleanup_data, &remaining_time) == 1)
+
+    //SIMIX_process_on_exit(MSG_process_self(), execute_task_cleanup, cleanup_data);
+
+    // Create root task
+    job->task = new BatTask(job, workload->profiles->at(job->profile));
+
+    // Execute the process
+    job->return_code = execute_task(job->task, args->context, args->allocation,
+                                    cleanup_data, &remaining_time);
+    if (job->return_code == 0)
     {
-        XBT_INFO("Job %s finished in time", job->id.c_str());
+        XBT_INFO("Job %s finished in time (success)", job->id.to_string().c_str());
         job->state = JobState::JOB_STATE_COMPLETED_SUCCESSFULLY;
+    }
+    else if (job->return_code > 0)
+    {
+        XBT_INFO("Job %s finished in time (failed: return_code=%d)",
+                 job->id.to_string().c_str(), job->return_code);
+        job->state = JobState::JOB_STATE_COMPLETED_FAILED;
     }
     else
     {
         XBT_INFO("Job %s had been killed (walltime %g reached)",
-                 job->id.c_str(), (double) job->walltime);
-        job->state = JobState::JOB_STATE_COMPLETED_KILLED;
+                 job->id.to_string().c_str(), (double) job->walltime);
+        job->state = JobState::JOB_STATE_COMPLETED_WALLTIME_REACHED;
         job->kill_reason = "Walltime reached";
         if (args->context->trace_schedule)
+        {
             args->context->paje_tracer.add_job_kill(job, args->allocation->machine_ids,
                                                     MSG_get_clock(), true);
+        }
     }
 
     args->context->machines.update_machines_on_job_end(job, args->allocation->machine_ids,
@@ -354,7 +406,7 @@ int execute_job_process(int argc, char *argv[])
     job->runtime = MSG_get_clock() - job->starting_time;
     if (job->runtime == 0)
     {
-        XBT_WARN("Job '%s' computed in null time. Putting epsilon instead.", job->id.c_str());
+        XBT_WARN("Job '%s' computed in null time. Putting epsilon instead.", job->id.to_string().c_str());
         job->runtime = Rational(1e-5);
     }
 
@@ -398,13 +450,17 @@ int waiter_process(int argc, char *argv[])
         double time_to_wait = args->target_time - curr_time;
         // Sometimes time_to_wait is so small that it does not affect MSG_process_sleep. The value of 1e-5 have been found on trial-error.
         if(time_to_wait < 1e-5)
+        {
             time_to_wait = 1e-5;
+        }
         XBT_INFO("Sleeping %g seconds to reach time %g", time_to_wait, args->target_time);
         MSG_process_sleep(time_to_wait);
         XBT_INFO("Sleeping done");
     }
     else
+    {
         XBT_INFO("Time %g is already reached, skipping sleep", args->target_time);
+    }
 
     send_message("server", IPMessageType::WAITING_DONE);
     delete args;
@@ -412,38 +468,7 @@ int waiter_process(int argc, char *argv[])
     return 0;
 }
 
-int execute_profile_cleanup(void * unknown, void * data)
-{
-    (void) unknown;
 
-    CleanExecuteProfileData * cleanup_data = (CleanExecuteProfileData *) data;
-    xbt_assert(cleanup_data != nullptr);
-
-    XBT_DEBUG("before freeing computation amount %p", cleanup_data->computation_amount);
-    xbt_free(cleanup_data->computation_amount);
-    XBT_DEBUG("before freeing communication amount %p", cleanup_data->communication_amount);
-    xbt_free(cleanup_data->communication_amount);
-
-    if (cleanup_data->exec_process_args != nullptr)
-    {
-        XBT_DEBUG("before deleting exec_process_args->allocation %p",
-                  cleanup_data->exec_process_args->allocation);
-        delete cleanup_data->exec_process_args->allocation;
-        XBT_DEBUG("before deleting exec_process_args %p", cleanup_data->exec_process_args);
-        delete cleanup_data->exec_process_args;
-    }
-
-    if (cleanup_data->task != nullptr)
-    {
-        XBT_WARN("Not cleaning the task data to avoid a SG deadlock :(");
-        //MSG_task_destroy(cleanup_data->task);
-    }
-
-    XBT_DEBUG("before deleting cleanup_data %p", cleanup_data);
-    delete cleanup_data;
-
-    return 0;
-}
 
 int killer_process(int argc, char *argv[])
 {
@@ -452,19 +477,35 @@ int killer_process(int argc, char *argv[])
 
     KillerProcessArguments * args = (KillerProcessArguments *) MSG_process_get_data(MSG_process_self());
 
+    KillingDoneMessage * message = new KillingDoneMessage;
+    message->jobs_ids = args->jobs_ids;
+
     for (const JobIdentifier & job_id : args->jobs_ids)
     {
         Job * job = args->context->workloads.job_at(job_id);
         Profile * profile = args->context->workloads.at(job_id.workload_name)->profiles->at(job->profile);
         (void) profile;
 
-        xbt_assert(job->state == JobState::JOB_STATE_RUNNING ||
-                   job->state == JobState::JOB_STATE_COMPLETED_KILLED ||
-                   job->state == JobState::JOB_STATE_COMPLETED_SUCCESSFULLY,
-                   "Bad kill: job %s is not running", job->id.c_str());
+        xbt_assert(! (job->state == JobState::JOB_STATE_REJECTED ||
+                      job->state == JobState::JOB_STATE_SUBMITTED ||
+                      job->state == JobState::JOB_STATE_NOT_SUBMITTED),
+                   "Bad kill: job %s has not been started", job->id.to_string().c_str());
 
         if (job->state == JobState::JOB_STATE_RUNNING)
         {
+            BatTask * job_progress = job->compute_job_progress();
+
+            // Consistency checks
+            if (profile->is_parallel_task() ||
+                profile->type == ProfileType::DELAY)
+            {
+                xbt_assert(job_progress != nullptr,
+                           "MSG and delay profiles should contain jobs progress");
+            }
+
+            // Store job progress in the message
+            message->jobs_progress[job_id] = job_progress;
+
             // Let's kill all the involved processes
             xbt_assert(job->execution_processes.size() > 0);
             for (msg_process_t process : job->execution_processes)
@@ -484,11 +525,11 @@ int killer_process(int argc, char *argv[])
             job->runtime = (Rational)MSG_get_clock() - job->starting_time;
 
             xbt_assert(job->runtime >= 0, "Negative runtime of killed job '%s' (%g)!",
-                       job->id.c_str(), (double)job->runtime);
+                       job->id.to_string().c_str(), (double)job->runtime);
             if (job->runtime == 0)
             {
                 XBT_WARN("Killed job '%s' has a null runtime. Putting epsilon instead.",
-                         job->id.c_str());
+                         job->id.to_string().c_str());
                 job->runtime = Rational(1e-5);
             }
 
@@ -507,8 +548,6 @@ int killer_process(int argc, char *argv[])
         }
     }
 
-    KillingDoneMessage * message = new KillingDoneMessage;
-    message->jobs_ids = args->jobs_ids;
     send_message("server", IPMessageType::KILLING_DONE, (void*)message);
     delete args;
 
