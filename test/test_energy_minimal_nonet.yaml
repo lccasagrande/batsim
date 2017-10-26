@@ -4,7 +4,7 @@
 #base_working_directory: ~/proj/batsim
 
 # If needed, the output directory of this script can be specified within this file
-base_output_directory: /tmp/batsim_tests/energy_minimal
+base_output_directory: /tmp/batsim_tests/energy_minimal_nonet
 
 base_variables:
   batsim_dir: ${base_working_directory}
@@ -14,7 +14,7 @@ implicit_instances:
   implicit:
     sweep:
       platform :
-        - {"name":"homo128", "filename":"${batsim_dir}/platforms/cluster_energy_128.xml", "master_host":"master_host0"}
+        - {"name":"homo128", "filename":"${batsim_dir}/platforms/energy_platform_homogeneous_no_net_128.xml", "master_host":"master_host"}
       workload :
         - {"name":"comp", "filename":"${batsim_dir}/workload_profiles/energy_minimal_compute.json"}
         - {"name":"comm", "filename":"${batsim_dir}/workload_profiles/energy_minimal_comm.json"}
