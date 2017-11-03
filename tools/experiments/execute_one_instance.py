@@ -508,7 +508,7 @@ def execute_batsim_alone(batsim_command, batsim_stdout_file, batsim_stderr_file,
 def execute_batsim_and_sched(batsim_command, sched_command,
                              batsim_stdout_file, batsim_stderr_file,
                              sched_stdout_file, sched_stderr_file,
-                             timeout=None, wait_timeout_on_success=600):
+                             timeout=None, wait_timeout_on_success=3600):
     """Execute Batsim+Sched and wait for their termination."""
     loop = asyncio.get_event_loop()
     proc_set = set()
