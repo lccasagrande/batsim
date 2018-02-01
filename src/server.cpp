@@ -34,6 +34,7 @@ int server_process(int argc, char *argv[])
     // Let's tell the Decision process that the simulation is about to begin
     // (and that some data can be read from the data storage)
     context->proto_writer->append_simulation_begins(context->machines,
+                                                    context->workloads,
                                                     context->config_file,
                                                     context->allow_time_sharing,
                                                     MSG_get_clock());
@@ -225,6 +226,7 @@ void server_on_job_completed(ServerData * data,
                                                       status,
                                                       job_state_to_string(job->state),
                                                       job->kill_reason,
+                                                      job->allocation.to_string_hyphen(" "),
                                                       job->return_code,
                                                       MSG_get_clock());
 
@@ -426,7 +428,7 @@ void server_on_sched_tell_me_energy(ServerData * data,
 {
     (void) task_data;
     long double total_consumed_energy = data->context->machines.total_consumed_energy(data->context);
-    data->context->proto_writer->append_query_reply_energy(total_consumed_energy, MSG_get_clock());
+    data->context->proto_writer->append_answer_energy(total_consumed_energy, MSG_get_clock());
 }
 
 void server_on_wait_query(ServerData * data,
@@ -537,77 +539,26 @@ void server_on_submit_job(ServerData * data,
     xbt_assert(task_data->data != nullptr);
     JobSubmittedByDPMessage * message = (JobSubmittedByDPMessage *) task_data->data;
 
-    xbt_assert(data->context->submission_sched_enabled,
-               "Job submission coming from the decision process received but the option "
-               "seems disabled... It can be activated by specifying a configuration file "
-               "to Batsim.");
-
-    xbt_assert(!data->context->workloads.job_exists(message->job_id),
-               "Bad job submission received from the decision process: job %s already exists.",
-               message->job_id.to_string().c_str());
-
-    // Let's create the workload if it doesn't exist, or retrieve it otherwise
-    Workload * workload = nullptr;
-    if (data->context->workloads.exists(message->job_id.workload_name))
-    {
-        workload = data->context->workloads.at(message->job_id.workload_name);
-    }
-    else
-    {
-        workload = new Workload(message->job_id.workload_name);
-        data->context->workloads.insert_workload(workload->name, workload);
-    }
-
-    // If redis is enabled, the job description must be retrieved from it
-    if (data->context->redis_enabled)
-    {
-        xbt_assert(message->job_description.empty(), "Internal error");
-        string job_key = RedisStorage::job_key(message->job_id);
-        message->job_description = data->context->storage.get(job_key);
-    }
-    else
-    {
-        xbt_assert(!message->job_description.empty(), "Internal error");
-    }
-
-    // Let's parse the user-submitted job
-    XBT_INFO("Parsing user-submitted job %s", message->job_id.to_string().c_str());
-    Job * job = Job::from_json(message->job_description, workload,
-                               "Invalid JSON job submitted by the scheduler");
-    workload->jobs->add_job(job);
-    job->id = JobIdentifier(workload->name, job->number);
-
-    // Let's parse the profile if needed
-    if (!workload->profiles->exists(job->profile))
-    {
-        XBT_INFO("The profile of user-submitted job '%s' does not exist yet.",
-                 job->profile.c_str());
-
-        // If redis is enabled, the profile description must be retrieved from it
-        if (data->context->redis_enabled)
-        {
-            xbt_assert(message->job_profile_description.empty(), "Internal error");
-            string profile_key = RedisStorage::profile_key(message->job_id.workload_name,
-                                                           job->profile);
-            message->job_profile_description = data->context->storage.get(profile_key);
-        }
-        else
-        {
-            xbt_assert(!message->job_profile_description.empty(), "Internal error");
-        }
-
-        Profile * profile = Profile::from_json(job->profile,
-                                               message->job_profile_description,
-                                               "Invalid JSON profile received from the scheduler");
-        workload->profiles->add_profile(job->profile, profile);
-    }
-    // TODO? check profile collisions otherwise
-
-    // Let's set the job state
-    job->state = JobState::JOB_STATE_SUBMITTED;
-
     // Let's update global states
     ++data->nb_submitted_jobs;
+
+    xbt_assert(data->context->workloads.job_exists(message->job_id),
+               "Internal error: job '%s' should exist.",
+               message->job_id.to_string().c_str());
+
+    const Job * job = data->context->workloads.job_at(message->job_id);
+
+    Workload * workload = data->context->workloads.at(message->job_id.workload_name);
+    xbt_assert(workload->profiles->exists(job->profile),
+               "Dynamically submitted job '%s' has no profile: "
+               "Workload '%s' has no profile named '%s'. "
+               "When submitting a dynamic job, its profile should either already exist "
+               "or be submitted inside the SUBMIT_JOB message. "
+               "If the profile is also dynamic, it can be submitted with the SUBMIT_PROFILE "
+               "message but you must ensure that the profile is sent (non-strictly) before "
+               "the SUBMIT_JOB message.",
+               job->id.to_string().c_str(),
+               workload->name.c_str(), job->profile.c_str());
 
     if (data->context->submission_sched_ack)
     {
@@ -647,7 +598,7 @@ void server_on_submit_profile(ServerData * data,
     }
     else
     {
-        workload = new Workload(message->workload_name);
+        workload = new Workload(message->workload_name, "Dynamic");
         data->context->workloads.insert_workload(workload->name, workload);
     }
 
@@ -660,6 +611,12 @@ void server_on_submit_profile(ServerData * data,
                                                message->profile,
                                                "Invalid JSON profile received from the scheduler");
         workload->profiles->add_profile(message->profile_name, profile);
+    }
+    else
+    {
+        XBT_WARN("New submission of profile '%s' of workload '%s' is discarded (old profile kept as-is)",
+                 message->profile.c_str(), message->workload_name.c_str());
+        // TODO? check profile collisions
     }
 }
 

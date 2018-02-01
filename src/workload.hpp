@@ -23,8 +23,10 @@ public:
     /**
      * @brief Builds an empty Workload
      * @param[in] workload_name The workload name
+     * @param[in] workload_file The workload file name
      */
-    explicit Workload(const std::string & workload_name);
+    explicit Workload(const std::string & workload_name,
+                      const std::string & workload_file);
 
     /**
      * @brief Workloads cannot be copied.
@@ -57,6 +59,7 @@ public:
 
 public:
     std::string name; //!< The Workload name
+    std::string file = ""; //!< The Workload file if it exists
     Jobs * jobs = nullptr; //!< The Jobs of the Workload
     Profiles * profiles = nullptr; //!< The Profiles associated to the Jobs of the Workload
 };
@@ -115,6 +118,13 @@ public:
      * @pre The workload exists
      */
     const Workload * at(const std::string & workload_name) const;
+
+    /**
+     * @brief Returns the number of workloads
+     * @return The number of workloads
+     */
+    int nb_workloads() const;
+
 
     /**
      * @brief Allows to get a job from the Workloads

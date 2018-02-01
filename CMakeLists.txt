@@ -217,10 +217,17 @@ add_test(energy
          -bod /tmp/batsim_tests/energy
          -bwd ${CMAKE_SOURCE_DIR})
 
+
 add_test(energy_pform_gen
          ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
          ${CMAKE_SOURCE_DIR}/test/test_energy_pform_gen.yaml
          -bod /tmp/batsim_tests/energy_pform_gen
+         -bwd ${CMAKE_SOURCE_DIR})
+
+add_test(energy_query
+         ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
+         ${CMAKE_SOURCE_DIR}/test/test_energy_query.yaml
+         -bod /tmp/batsim_tests/energy_query
          -bwd ${CMAKE_SOURCE_DIR})
 
 add_test(walltime
@@ -335,5 +342,17 @@ add_test(pybatsim_tests
 add_test(fewer_resources
          ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
          ${CMAKE_SOURCE_DIR}/test/test_fewer_resources.yaml
-         -bod /tmp/fewer_resources
+         -bod /tmp/batsim_tests/fewer_resources
+         -bwd ${CMAKE_SOURCE_DIR})
+
+add_test(set_job_metadata
+         ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
+         ${CMAKE_SOURCE_DIR}/test/test_set_job_metadata.yaml
+         -bod /tmp/batsim_tests/set_job_metadata
+         -bwd ${CMAKE_SOURCE_DIR})
+
+add_test(send_recv
+         ${CMAKE_SOURCE_DIR}/tools/experiments/execute_instances.py
+         ${CMAKE_SOURCE_DIR}/test/test_send_recv.yaml
+         -bod /tmp/send_recv
          -bwd ${CMAKE_SOURCE_DIR})
